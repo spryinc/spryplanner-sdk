@@ -2,6 +2,12 @@ name: TypeScript SDK alpha release
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: SDK release or documentation-only trusted-publisher bootstrap
+        type: choice
+        options: [sdk, bootstrap]
+        default: sdk
+        required: true
       qualification_run:
         description: Successful SDK qualification push run on main
         required: true
@@ -37,6 +43,7 @@ jobs:
           gh api "repos/$REPO/commits/$sha/pulls" | jq -e 'any(.[]; .merged_at != null and .base.ref == "main")'
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
   validate:
+    if: inputs.operation == 'sdk'
     needs: resolve
     runs-on: ubuntu-latest
     steps:
@@ -64,6 +71,7 @@ jobs:
           HASH: ${{ inputs.artifact_sha256 }}
         run: node tools/release.mjs artifacts "$HASH"
   publish:
+    if: inputs.operation == 'sdk'
     needs: [resolve, validate]
     runs-on: ubuntu-latest
     environment: npm-sdk-release
@@ -93,3 +101,33 @@ jobs:
           node --input-type=module -e 'import fs from "node:fs";import crypto from "node:crypto";const c=JSON.parse(fs.readFileSync("artifacts/candidate.json"));if(c.sha256!==process.env.HASH||crypto.createHash("sha256").update(fs.readFileSync("artifacts/"+c.filename)).digest("hex")!==process.env.HASH)throw Error("Checksum mismatch");'
           archive=$(node -p 'JSON.parse(require("fs").readFileSync("artifacts/candidate.json")).filename')
           npm publish "artifacts/$archive" --access public --tag alpha --provenance --ignore-scripts
+
+  bootstrap:
+    if: inputs.operation == 'bootstrap'
+    needs: resolve
+    runs-on: ubuntu-latest
+    environment: npm-sdk-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Prepare only the approved documentation reservation
+        env:
+          HASH: ${{ inputs.artifact_sha256 }}
+        run: |
+          set -euo pipefail
+          node tools/bootstrap.mjs "$RUNNER_TEMP/reservation" oidc "$HASH" > "$RUNNER_TEMP/reservation.json"
+      - name: Install isolated staging-capable npm CLI
+        run: npm install --prefix "$RUNNER_TEMP/npm-admin" npm@11.21.0 --ignore-scripts --no-audit --no-fund
+      - name: Test OIDC with unapproved documentation-only staging
+        run: |
+          set -euo pipefail
+          archive=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/reservation.json")).archive')
+          node "$RUNNER_TEMP/npm-admin/node_modules/npm/bin/npm-cli.js" stage publish "$archive" --access public --tag bootstrap --ignore-scripts

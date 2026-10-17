@@ -1,0 +1,89 @@
+{
+  "scope": "synthetic regional API; deployed onboarding is separate and pending",
+  "report": {
+    "schemaVersion": 2,
+    "status": "verified-local",
+    "qualificationRun": "d8413e8b-2ac4-48ff-8f80-9e776d23d158",
+    "sha256": "76e0bb57852f4475c1e91df3e27fef270ad9191cb67a29b0896b991131b912d0",
+    "package": "@spryinc/spryplanner-sdk@0.1.0-alpha.1",
+    "artifact": "76e0bb57852f4475c1e91df3e27fef270ad9191cb67a29b0896b991131b912d0/spryinc-spryplanner-sdk-0.1.0-alpha.1.tgz",
+    "packageManagers": [
+      {
+        "qualificationDigest": "62b582d9d8491f5579f621d623d5d895f29de1ff88bae817ac4d5f3f56fcc2c9",
+        "schemaVersion": 2,
+        "qualificationRun": "d8413e8b-2ac4-48ff-8f80-9e776d23d158",
+        "packageManager": "npm",
+        "packageManagerVersion": "11.13.0",
+        "platform": "darwin",
+        "architecture": "x64",
+        "status": "verified-local",
+        "package": "@spryinc/spryplanner-sdk@0.1.0-alpha.1",
+        "artifact": "76e0bb57852f4475c1e91df3e27fef270ad9191cb67a29b0896b991131b912d0/spryinc-spryplanner-sdk-0.1.0-alpha.1.tgz",
+        "sha256": "76e0bb57852f4475c1e91df3e27fef270ad9191cb67a29b0896b991131b912d0",
+        "integrity": "sha512-wB6sU7ILNEAHJgHpBUeL3qaFtJTb/ryd/T7VtUKQhX46vH4nPIKqcfUkwGEDgJInwXIPuU6sApQoGQFkh/nEQA==",
+        "node": "24.17.0",
+        "phases": [
+          "workflow",
+          "commonjs",
+          "scope",
+          "expired",
+          "revoked",
+          "downgraded",
+          "suspended",
+          "expired-trial",
+          "removed"
+        ],
+        "installedOutsideMonorepo": true,
+        "registry": "ephemeral-loopback-registry",
+        "publicRegistryPublished": false,
+        "freshConsumerCache": true,
+        "registryTarballsFetched": true,
+        "build": {
+          "mode": "external-public-source-candidate",
+          "sourceDigest": "682552b5aad8c83f99dc357dae3da6d1fb661c4ccf4e3d4c6e1204ca55b26a86",
+          "sourceCommit": "fcc68265a8dc54146bfbd0a18ec3c4e486265701",
+          "sha256": "76e0bb57852f4475c1e91df3e27fef270ad9191cb67a29b0896b991131b912d0"
+        },
+        "checkedAt": "2026-10-17T21:18:20.071Z"
+      },
+      {
+        "qualificationDigest": "62b582d9d8491f5579f621d623d5d895f29de1ff88bae817ac4d5f3f56fcc2c9",
+        "schemaVersion": 2,
+        "qualificationRun": "d8413e8b-2ac4-48ff-8f80-9e776d23d158",
+        "packageManager": "pnpm",
+        "packageManagerVersion": "11.1.2",
+        "platform": "darwin",
+        "architecture": "x64",
+        "status": "verified-local",
+        "package": "@spryinc/spryplanner-sdk@0.1.0-alpha.1",
+        "artifact": "76e0bb57852f4475c1e91df3e27fef270ad9191cb67a29b0896b991131b912d0/spryinc-spryplanner-sdk-0.1.0-alpha.1.tgz",
+        "sha256": "76e0bb57852f4475c1e91df3e27fef270ad9191cb67a29b0896b991131b912d0",
+        "integrity": "sha512-wB6sU7ILNEAHJgHpBUeL3qaFtJTb/ryd/T7VtUKQhX46vH4nPIKqcfUkwGEDgJInwXIPuU6sApQoGQFkh/nEQA==",
+        "node": "24.17.0",
+        "phases": [
+          "workflow",
+          "commonjs",
+          "scope",
+          "expired",
+          "revoked",
+          "downgraded",
+          "suspended",
+          "expired-trial",
+          "removed"
+        ],
+        "installedOutsideMonorepo": true,
+        "registry": "ephemeral-loopback-registry",
+        "publicRegistryPublished": false,
+        "freshConsumerCache": true,
+        "registryTarballsFetched": true,
+        "build": {
+          "mode": "external-public-source-candidate",
+          "sourceDigest": "682552b5aad8c83f99dc357dae3da6d1fb661c4ccf4e3d4c6e1204ca55b26a86",
+          "sourceCommit": "fcc68265a8dc54146bfbd0a18ec3c4e486265701",
+          "sha256": "76e0bb57852f4475c1e91df3e27fef270ad9191cb67a29b0896b991131b912d0"
+        },
+        "checkedAt": "2026-10-17T21:18:28.001Z"
+      }
+    ]
+  }
+}

@@ -1,7 +1,13 @@
 {
   "schemaVersion": 1,
-  "artifactSha256": null,
-  "sourceDigest": null,
-  "regionalApiQualification": {"status": "pending", "evidence": null},
-  "deployedOnboarding": {"status": "pending", "evidence": null}
+  "artifactSha256": "76e0bb57852f4475c1e91df3e27fef270ad9191cb67a29b0896b991131b912d0",
+  "sourceDigest": "682552b5aad8c83f99dc357dae3da6d1fb661c4ccf4e3d4c6e1204ca55b26a86",
+  "regionalApiQualification": {
+    "status": "passed",
+    "evidence": "evidence/regional-qualification.json"
+  },
+  "deployedOnboarding": {
+    "status": "pending",
+    "evidence": null
+  }
 }

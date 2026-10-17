@@ -61,9 +61,11 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Locate the pinned pnpm entry point
+      - name: Install the pinned consumer pnpm client
         shell: bash
-        run: node tools/find-pnpm.mjs >> "$GITHUB_ENV"
+        run: |
+          npm install --prefix "$RUNNER_TEMP/spry-pnpm-client" pnpm@11.1.2 --ignore-scripts --no-audit --no-fund
+          node -e 'const path=require("node:path"); console.log("PNPM_CLI="+path.join(process.env.RUNNER_TEMP,"spry-pnpm-client/node_modules/pnpm/bin/pnpm.mjs"))' >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v8
         with:
           name: sdk-candidate
