@@ -70,7 +70,9 @@ try {
   const zod = JSON.parse(
     await readFile(path.join(root, "node_modules/zod/package.json"), "utf8"),
   );
-  const zodPack = await pack(path.join(root, "node_modules/zod"));
+  // Use the published dependency archive: repacking an installed dependency can
+  // lose files through the enclosing checkout's ignore rules.
+  const zodPack = await pack(`zod@${zod.version}`);
   const compiler = await pack(path.join(root, "node_modules/typescript"));
   const archives = new Map([
     ["/sdk.tgz", bytes],
