@@ -29,11 +29,12 @@ jobs:
           path: |
             .verification
             packages/sdk-typescript/dist
+          restore-keys: sdk-verify-${{ runner.os }}-24.17.0-
           key: sdk-verify-${{ runner.os }}-24.17.0-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc', 'package.json', 'build.mjs', 'tsconfig.base.json', '.node-version', 'packages/**', 'tools/**') }}
       - run: node tools/verify.mjs build
       - run: node tools/verify.mjs test
       - run: node tools/verify.mjs typecheck
-      - run: node --test tools/release.test.mjs tools/verification/receipts.test.mjs
+      - run: node --test tools/release.test.mjs tools/find-pnpm.test.mjs tools/verification/receipts.test.mjs
       - run: node tools/candidate.mjs
       - uses: actions/upload-artifact@v7
         with:
