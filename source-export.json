@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "repository": "spryinc/spryplanner-sdk",
+  "origin": "reviewed source-only SDK and required contract closure",
+  "files": {
+    "packages/api-contract/src/calendarFeeds.ts": "b877a98caa77af82f890ff51490bf232011ba6069b378439cda4238e9583f74b",
+    "packages/api-contract/src/contentPrimitives.ts": "b45347d0584c946a58b4541bfb2d7ea7f8865757491a55be4960488514fe5f1c",
+    "packages/api-contract/src/externalCalendar.ts": "15a94c03da9c36fd9e7eb95f61d6ea55a0f79960fae1319dea0520092e8b42ea",
+    "packages/api-contract/src/externalCalendarRegistry.ts": "0a6bbb6a86fa7cecd0115d4c8fa777092b0b22bc831519ed33acf35af61ccd21",
+    "packages/api-contract/src/index.ts": "fcf1f5ab46a181b7ef81cdbb2dfe07ed28175ac15b4300f3f178ddd2719b4b83",
+    "packages/api-contract/src/taskWorkflowPolicy.ts": "14e569b64549fd48c49719c4f617bf086153ae115ae66c367c21f58495b078ac",
+    "packages/api-contract/src/temporalInstants.ts": "1dd28dfbb59319162359d305bdfb6274cfc20c6fb1786d217dd4c2693caebe41",
+    "packages/sdk-typescript/src/index.test.ts": "82b7148e33f681ce2c52ad73f6ada6ea887165217ac6f550f501e39973f7409f",
+    "packages/sdk-typescript/src/index.ts": "198f844ec31180d0e5d4463b683d1060a8d07a6901b99eed5add8215b5365ac7"
+  }
+}

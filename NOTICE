@@ -1,0 +1,12 @@
+SpryPlanner TypeScript SDK
+Copyright 2026 Spry contributors
+
+This SDK includes generated validation code from SpryPlanner API contracts.
+The Apache-2.0 grant covers this SDK and its bundled contract code only.
+Other SpryPlanner packages and the hosted service retain their own terms.
+
+Zod is installed separately under its MIT license; its copyright and license
+are included in the Zod dependency distribution.
+
+Bundled portions of @asteasolutions/zod-to-openapi are MIT licensed.
+See THIRD-PARTY-LICENSES for the original copyright and permission notice.
