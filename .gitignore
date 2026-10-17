@@ -1,0 +1,6 @@
+node_modules/
+**/dist/
+artifacts/
+.verification/
+*.tgz
+.env*
