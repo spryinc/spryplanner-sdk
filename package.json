@@ -1,0 +1,27 @@
+{
+  "name": "spryplanner-sdk-source",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.17.0 <25"
+  },
+  "scripts": {
+    "build": "node tools/verify.mjs build",
+    "test": "node tools/verify.mjs test",
+    "typecheck": "node tools/verify.mjs typecheck",
+    "test:release": "node --test tools/release.test.mjs tools/verification/receipts.test.mjs",
+    "candidate": "node tools/candidate.mjs",
+    "qualify:install": "node tools/qualify-install.mjs"
+  },
+  "dependencies": {
+    "zod": "3.25.76",
+    "@asteasolutions/zod-to-openapi": "7.3.4"
+  },
+  "devDependencies": {
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "packageManager": "pnpm@11.1.2"
+}
