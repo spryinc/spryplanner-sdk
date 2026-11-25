@@ -67,6 +67,102 @@ def classify(paths, before, after):
     return controls, not controls or bool(product_paths), scripts
 
 
+def yaml_data(source):
+    import yaml
+
+    return yaml.load(source, Loader=yaml.BaseLoader)
+
+
+def job_condition(value):
+    condition = (value or "").strip().removeprefix("${{").removesuffix("}}").strip()
+    selected = "needs.verification-scope.outputs.product == 'true'"
+    optional = "needs.verification-scope.outputs.product != 'false'"
+    dispatch = "github.event_name == 'workflow_dispatch'"
+    pull_request = "github.event_name == 'pull_request'"
+    prefix = f"!cancelled() && ({dispatch} || {optional})"
+    if condition in {selected, prefix, f"!cancelled() && {optional}"}:
+        return ""
+    if condition.startswith(selected + " && "):
+        return condition[len(selected + " && "):]
+    if condition.startswith(prefix + " && (") and condition.endswith(")"):
+        return condition[len(prefix + " && ("):-1]
+    release = "needs.verify-release.result == 'success'"
+    if condition == f"!cancelled() && (({pull_request} && {optional}) || ({dispatch} && {release}))":
+        return f"always() && ({pull_request} || {release})"
+    return condition
+
+
+def workflow_execution(document):
+    """Compare worker definitions after removing the known selector wiring."""
+    document = dict(document)
+    jobs = document.pop("jobs")
+    wrappers = {
+        job_id for job_id, job in jobs.items()
+        if f"{job_id}-product" in jobs and job.get("needs") == ["verification-scope", f"{job_id}-product"]
+    }
+    workers = {}
+    for job_id, definition in jobs.items():
+        job = dict(definition)
+        if job_id == "verification-scope" or job_id in wrappers:
+            continue
+        # The SDK already has a result-only gate; the scope runs that gate.
+        needs = job.pop("needs", [])
+        if isinstance(needs, str):
+            needs = [needs]
+        needs = [name for name in needs if name != "verification-scope"]
+        if job_id == "required" and job.get("name") == "SDK qualification gate" and needs == ["build", "install"]:
+            continue
+        if needs:
+            job["needs"] = needs
+        condition = job_condition(job.pop("if", None))
+        if condition:
+            job["if"] = condition
+        key = job_id.removesuffix("-product") if job_id.removesuffix("-product") in wrappers else job_id
+        job.pop("name", None)
+        workers[key] = job
+    return document, workers
+
+
+def uses_changed_action(document, action_paths):
+    if not action_paths:
+        return False
+    _, jobs = workflow_execution(document)
+    for job in jobs.values():
+        for step in job.get("steps", []):
+            use = step.get("uses", "")
+            if use.startswith("./") and any(name.startswith(use[2:].rstrip("/") + "/") for name in action_paths):
+                return True
+    return False
+
+
+def workflow_needs_product(workflow, controls, scripts, before, head):
+    prefix = ".github/workflows/"
+    if not workflow.startswith(prefix):
+        return True
+    actions = {name for name in controls if name.startswith(".github/actions/")}
+    verifier_paths = registered_check_paths(before) & registered_check_paths(head)
+    executable_changed = bool(scripts or (controls & verifier_paths) - {
+        name for name in verifier_paths if name.startswith(CONTROL_DIRECTORIES)
+    })
+    if workflow not in controls and not actions and not executable_changed:
+        return False
+    try:
+        candidate = yaml_data(git("show", f"{head}:{workflow}"))
+        selector = candidate["jobs"]["verification-scope"]
+        primary = any(
+            step.get("with", {}).get("validate") in {"true", True}
+            for step in selector["steps"]
+        )
+        if (executable_changed and primary) or uses_changed_action(candidate, actions):
+            return True
+        return workflow in controls and workflow_execution(
+            yaml_data(git("show", f"{before}:{workflow}"))
+        ) != workflow_execution(candidate)
+    except SELECTION_ERRORS + (TypeError, AttributeError):
+        # An unknown workflow shape cannot prove its worker is unchanged.
+        return True
+
+
 def github_selection():
     event = os.environ["GITHUB_EVENT_NAME"]
     if event not in {"pull_request", "push"}:
@@ -83,7 +179,12 @@ def github_selection():
             if payload["ref"].startswith("refs/heads/") and payload["ref"] != default_ref:
                 default_tip = f"refs/remotes/origin/{payload['repository']['default_branch']}"
                 before = git("merge-base", default_tip, head).decode().strip()
-    return classify(changes(before, head), before, head)
+    controls, product, scripts = classify(changes(before, head), before, head)
+    workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
+    workflow = workflow_ref.split("/", 2)[-1].split("@", 1)[0]
+    if not product and workflow:
+        product = workflow_needs_product(workflow, controls, scripts, before, head)
+    return controls, product, scripts
 
 
 def pre_push_controls(remote, updates):

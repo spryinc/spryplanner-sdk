@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from scope import CONTRACTS, changes, classify, github_selection, git, pre_push_controls
+from scope import CONTRACTS, changes, classify, github_selection, git, pre_push_controls, workflow_needs_product
 
 
 class VerificationScopeTest(unittest.TestCase):
@@ -94,6 +94,37 @@ class VerificationScopeTest(unittest.TestCase):
         git("merge", "--no-ff", "-qm", "Integrate controls", "controls")
         with patch.dict(os.environ, GITHUB_EVENT_NAME="pull_request", GITHUB_SHA=git("rev-parse", "HEAD").decode().strip()):
             self.assertEqual(github_selection(), ({".github/workflows/ci.yml"}, False, set()))
+
+    def test_workflow_execution_changes_select_only_the_affected_workflow(self):
+        ci = Path(".github/workflows/ci.yml")
+        image = Path(".github/workflows/image.yml")
+        source = """jobs:
+  verification-scope:
+    timeout-minutes: 5
+    steps:
+      - uses: ./.github/actions/verification-scope
+        with:
+          validate: 'true'
+  verify-product:
+    services:
+      database:
+        image: postgres:16
+    steps:
+      - run: pnpm run test
+"""
+        ci.write_text(source)
+        image.write_text(source.replace("validate: 'true'", "validate: 'false'"))
+        base = self.commit()
+        ci.write_text(source.replace("timeout-minutes: 5", "timeout-minutes: 6"))
+        metadata = self.commit()
+        self.assertFalse(workflow_needs_product(str(ci), {str(ci)}, set(), base, metadata))
+        ci.write_text(source.replace("postgres:16", "postgres:18"))
+        execution = self.commit()
+        self.assertTrue(workflow_needs_product(str(ci), {str(ci)}, set(), base, execution))
+        self.assertFalse(workflow_needs_product(str(image), {str(ci)}, set(), base, execution))
+        self.assertTrue(workflow_needs_product(str(ci), {"package.json"}, {"test"}, base, execution))
+        self.assertFalse(workflow_needs_product(str(image), {"package.json"}, {"test"}, base, execution))
+
 
     def test_missing_push_base_selects_product(self):
         scope = Path(__file__).with_name("scope.py").resolve()

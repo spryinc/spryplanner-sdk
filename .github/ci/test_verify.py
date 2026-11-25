@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from verify import TOKEN_ACTION, MISSING_APP_ID, UNKNOWN_CLIENT_ID
-from verify import legacy_token_diagnostics, validate_composite_actions
+from verify import legacy_token_diagnostics, require_contract_matches, validate_composite_actions
 
 
 class VerificationDefinitionTest(unittest.TestCase):
@@ -31,6 +31,18 @@ class VerificationDefinitionTest(unittest.TestCase):
                     ]
                     ignored = legacy_token_diagnostics(reports)
                     self.assertEqual(len(ignored), 2 if accepted else 0)
+
+    def test_contract_requires_every_named_test(self):
+        pattern = r"^(?:first case|second case)$"
+        require_contract_matches(pattern, "ok 1 - first case\nok 2 - second case")
+        for output in (
+            "ok 1 - first case",
+            "ok 1 - first case\nok 2 - second case # SKIP",
+            "ok 1 - test/contract.test.mjs",
+        ):
+            with self.assertRaises(SystemExit):
+                require_contract_matches(pattern, output)
+
 
     def test_composite_validates_its_shell_without_executing_it(self):
         with tempfile.TemporaryDirectory() as directory:

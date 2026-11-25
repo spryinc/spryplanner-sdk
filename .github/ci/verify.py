@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scope import CONTRACTS, LINT_CONFIG
+from scope import CONTRACTS, LINT_CONFIG, yaml_data
 
 
 TOKEN_ACTION = "actions/create-github-app-token@v3"
@@ -67,12 +67,7 @@ def validate_composite_actions(controls):
             continue
         if not path.is_file():
             continue
-        data = subprocess.check_output([
-            "ruby", "-rpsych", "-rjson", "-e",
-            'puts JSON.generate(Psych.safe_load(File.read(ARGV.fetch(0)), aliases: true))',
-            filename,
-        ])
-        action = json.loads(data)
+        action = yaml_data(path.read_bytes())
         runs = action["runs"]
         if runs["using"] != "composite":
             continue
@@ -142,6 +137,42 @@ def validate_local_files(controls, scripts):
                 subprocess.run(["sh", "-n", "-c", command], check=True)
 
 
+def root_locked_version(package):
+    lockfile = yaml_data(Path("pnpm-lock.yaml").read_bytes())
+    version = lockfile["importers"]["."]["devDependencies"][package]["version"]
+    if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ValueError(f"Expected a pinned root version for {package}")
+    return version
+
+
+def format_changed_controls(controls):
+    package = Path("package.json")
+    if not package.is_file():
+        return
+    if "prettier" not in json.loads(package.read_text()).get("devDependencies", {}):
+        return
+    files = sorted(name for name in controls
+                   if Path(name).suffix in {".json", ".yml", ".yaml", ".md"} and Path(name).is_file())
+    if files:
+        version = root_locked_version("prettier")
+        subprocess.run(["npm", "exec", "--yes", "--ignore-scripts", f"--package=prettier@{version}",
+                        "--", "prettier", "--check", "--", *files], check=True)
+
+
+def require_contract_matches(pattern, output):
+    if not pattern.startswith("^(?:") or not pattern.endswith(")$"):
+        raise ValueError(f"Expected a pattern made of exact test names: {pattern}")
+    expected = len(re.split(r"(?<!\\)\|", pattern[4:-2]))
+    matched = {
+        match[1] for line in output.splitlines()
+        if "# SKIP" not in line and "# TODO" not in line
+        if (match := re.fullmatch(r"ok \d+ - (.+)", line))
+        and re.fullmatch(pattern, match[1])
+    }
+    if len(matched) != expected:
+        raise SystemExit(f"Expected {expected} workflow contract tests, found {len(matched)} for {pattern}")
+
+
 def run_contracts(controls):
     if CONTRACTS.is_file():
         commands = json.loads(CONTRACTS.read_text())
@@ -158,9 +189,8 @@ def run_contracts(controls):
                 )
                 print(result.stdout, end="")
                 result.check_returncode()
-                if not any(line.startswith("# pass ") and int(line.split()[-1]) > 0
-                           for line in result.stdout.splitlines()):
-                    raise SystemExit(f"No workflow contract tests matched {command}")
+                pattern = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--test-name-pattern="))
+                require_contract_matches(pattern, result.stdout)
             else:
                 subprocess.run(command, check=True)
 
@@ -171,6 +201,7 @@ def main():
     lint_workflows(controls)
     validate_composite_actions(controls)
     validate_local_files(controls, selection["scripts"])
+    format_changed_controls(controls)
     for tests in ("test_scope.py", "test_verify.py"):
         subprocess.run([sys.executable, "-B", f".github/ci/{tests}"], check=True)
     run_contracts(controls)

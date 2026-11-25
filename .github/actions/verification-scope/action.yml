@@ -11,6 +11,12 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Install the workflow YAML parser
+      if: github.event_name == 'pull_request' || github.event_name == 'push'
+      shell: bash
+      run: |
+        python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/spry-ci-python" PyYAML==6.0.3
+        printf 'PYTHONPATH=%s\n' "$RUNNER_TEMP/spry-ci-python" >> "$GITHUB_ENV"
     - id: select
       shell: bash
       run: python3 .github/ci/scope.py github "$RUNNER_TEMP/spry-verification-scope.json"
