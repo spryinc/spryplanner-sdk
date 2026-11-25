@@ -1,0 +1,39 @@
+name: Verification scope
+description: Select product checks and validate affected check definitions
+inputs:
+  validate:
+    description: Run check-definition verification in the primary CI workflow
+    default: "false"
+outputs:
+  product:
+    description: Whether product verification is needed
+    value: ${{ steps.select.outputs.product }}
+  suites:
+    description: JSON list of triggered product suites
+    value: ${{ steps.select.outputs.suites }}
+runs:
+  using: composite
+  steps:
+    - name: Install the workflow YAML parser
+      if: github.event_name == 'pull_request' || github.event_name == 'push'
+      shell: bash
+      run: |
+        python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/spry-ci-python" PyYAML==6.0.3
+        printf 'PYTHONPATH=%s\n' "$RUNNER_TEMP/spry-ci-python" >> "$GITHUB_ENV"
+    - id: select
+      shell: bash
+      run: python3 .github/ci/scope.py github "$RUNNER_TEMP/spry-verification-scope.json"
+    - if: inputs.validate == 'true' && steps.select.outputs.workflows == 'true'
+      shell: bash
+      env:
+        GOBIN: ${{ runner.temp }}/spry-ci-tools
+      run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+    - if: inputs.validate == 'true' && steps.select.outputs.checks == 'true' && hashFiles('.github/ci/contracts.json') != ''
+      uses: actions/setup-node@v7
+      with:
+        node-version: "24.17.0"
+    - if: inputs.validate == 'true' && steps.select.outputs.checks == 'true'
+      shell: bash
+      env:
+        ACTIONLINT: ${{ runner.temp }}/spry-ci-tools/actionlint
+      run: python3 -B .github/ci/verify.py "$RUNNER_TEMP/spry-verification-scope.json"

@@ -1,0 +1,23 @@
+{
+  "tools/verification/receipts.mjs": [
+    [
+      "node",
+      "--test",
+      "tools/verification/receipts.test.mjs"
+    ]
+  ],
+  "tools/verification/receipts.test.mjs": [
+    [
+      "node",
+      "--test",
+      "tools/verification/receipts.test.mjs"
+    ]
+  ],
+  "tools/verify.mjs": [
+    [
+      "node",
+      "--test",
+      "tools/verification/receipts.test.mjs"
+    ]
+  ]
+}
