@@ -118,15 +118,15 @@ def result_gate(job, workers):
             and steps[0].get("run", "").strip() == command)
 
 
-def validate_result_gates(document):
+def validate_result_gates(document, workflow=None):
     jobs = document.get("jobs", {})
     for worker in jobs:
         if worker.endswith("-product"):
             gate = worker.removesuffix("-product")
             if not result_gate(jobs.get(gate, {}), [worker]):
                 raise ValueError(f"Invalid required result gate for {worker}: {gate}")
-    if "install" in jobs and jobs.get("required", {}).get("name") == "SDK qualification gate":
-        if not result_gate(jobs["required"], ["build", "install"]):
+    if workflow == ".github/workflows/sdk-ci.yml":
+        if not result_gate(jobs.get("required", {}), ["build", "install"]):
             raise ValueError("Invalid SDK qualification result gate")
 
 
@@ -148,7 +148,7 @@ def workflow_execution(document):
         if isinstance(needs, str):
             needs = [needs]
         needs = [name for name in needs if name != "verification-scope"]
-        if job_id == "required" and job.get("name") == "SDK qualification gate":
+        if job_id == "required" and needs == ["build", "install"]:
             legacy = definition.get("needs") == ["build", "install"]
             if (legacy or result_gate(definition, ["build", "install"])) and needs == ["build", "install"]:
                 continue

@@ -50,6 +50,12 @@ class VerificationDefinitionTest(unittest.TestCase):
         commands = {"verify": "pnpm run test && pnpm run lint", "test": "node --test",
                     "lint": "eslint .", "verify:pre-push": "pnpm run verify"}
         self.assertEqual(owned_package_scripts(workflow, commands), {"verify", "test", "lint"})
+        workflow["defaults"] = {"run": {"working-directory": "apps/site"}}
+        self.assertFalse(owned_package_scripts(workflow, commands))
+        del workflow["defaults"]
+        for source in ("cd apps/site && pnpm run test", "if false; then\npnpm test\nfi"):
+            workflow["jobs"]["check"]["steps"][0]["run"] = source
+            self.assertFalse(owned_package_scripts(workflow, commands))
 
     def test_required_result_gate_cannot_accept_failure(self):
         document = yaml_data(b"""
@@ -80,6 +86,11 @@ jobs:
         gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('test "$PRODUCT_RESULT" = success', "true")
         with self.assertRaises(ValueError):
             validate_result_gates(document)
+
+    def test_sdk_required_gate_is_enforced_by_workflow_path(self):
+        renamed = {"jobs": {"required": {"name": "A different display name"}}}
+        with self.assertRaises(ValueError):
+            validate_result_gates(renamed, ".github/workflows/sdk-ci.yml")
 
     def test_composite_validates_its_shell_without_executing_it(self):
         with tempfile.TemporaryDirectory() as directory:

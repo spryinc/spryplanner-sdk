@@ -94,7 +94,7 @@ def lint_workflows(controls):
     if workflows:
         for workflow in workflows:
             try:
-                validate_result_gates(yaml_data(Path(workflow).read_bytes()))
+                validate_result_gates(yaml_data(Path(workflow).read_bytes()), workflow)
             except ValueError as error:
                 raise SystemExit(f"{workflow}: {error}") from error
         if not shutil.which("shellcheck"):
@@ -143,25 +143,36 @@ def validate_local_files(controls, scripts):
 
 
 SCRIPT_CALL = re.compile(
-    r"(?:^|&&|\|\||;|\n)\s*(?:[A-Z_][A-Z_0-9]*=[^\s]+\s+)*(?:corepack\s+)?"
-    r"(?:pnpm|npm)\s+(?:(?:run|run-script)\s+)?([\w:-]+)"
+    r"(?:corepack[ \t]+)?(?:pnpm|npm)[ \t]+(?:(?:run|run-script)[ \t]+)?"
+    r"([A-Za-z][\w:-]*)(?:[ \t]+[-./\w:=]+)*"
 )
 
 
+def root_script_calls(source):
+    # Count straightforward root commands. A shell script with conditionals,
+    # directory changes, quoting or unknown commands needs an explicit contract.
+    commands = [command.strip() for line in source.splitlines() for command in line.split("&&")]
+    matches = [SCRIPT_CALL.fullmatch(command) for command in commands if command]
+    return [match[1] for match in matches] if all(matches) else []
+
+
 def owned_package_scripts(document, commands):
-    _, workers = workflow_execution(document)
-    pending = [
-        name for job in workers.values() for step in job.get("steps", [])
-        if not job.get("if") and not step.get("if") and not step.get("working-directory")
-        and not job.get("defaults", {}).get("run", {}).get("working-directory")
-        for name in SCRIPT_CALL.findall(step.get("run", ""))
-    ]
+    workflow, workers = workflow_execution(document)
+    root = workflow.get("defaults", {}).get("run", {}).get("working-directory", ".")
+    pending = []
+    for job in workers.values():
+        if job.get("if"):
+            continue
+        directory = job.get("defaults", {}).get("run", {}).get("working-directory", root)
+        for step in job.get("steps", []):
+            if not step.get("if") and step.get("working-directory", directory) in {"", ".", "./"}:
+                pending.extend(root_script_calls(step.get("run", "")))
     owned = set()
     while pending:
         name = pending.pop()
         if name in commands and name not in owned:
             owned.add(name)
-            pending.extend(SCRIPT_CALL.findall(commands[name]))
+            pending.extend(root_script_calls(commands[name]))
     return owned
 
 
