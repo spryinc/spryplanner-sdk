@@ -17,34 +17,75 @@ MISSING_APP_ID = f'missing input "app-id" which is required by action "{TOKEN_AC
 UNKNOWN_CLIENT_ID = f'input "client-id" is not defined in action "{TOKEN_ACTION}"'
 
 
+WORKFLOW_TOKEN_INPUTS = """
+def fields(node)
+  return {} unless node.is_a?(Psych::Nodes::Mapping)
+  node.children.each_slice(2).each_with_object({}) do |(key, value), result|
+    result[key.value] = value if key.respond_to?(:value)
+  end
+end
+
+root = fields(Psych.parse_file(ARGV.fetch(0)).root)
+pairs = fields(root["jobs"]).values.flat_map do |job|
+  steps = fields(job)["steps"]
+  next [] unless steps.is_a?(Psych::Nodes::Sequence)
+  steps.children.map do |step|
+    step = fields(step)
+    use = step["uses"]
+    input = fields(step["with"])["client-id"]
+    next unless use.is_a?(Psych::Nodes::Scalar) && use.value == ARGV.fetch(1)
+    next unless input.is_a?(Psych::Nodes::Scalar) && !input.value.strip.empty?
+    next if input.plain && ["null", "~"].include?(input.value.downcase)
+    [use.start_line + 1, input.start_line + 1]
+  end.compact
+end
+puts JSON.generate(pairs)
+"""
+
+
 def legacy_token_diagnostics(diagnostics):
-    """Allow the supported client-id input only on the step that supplies it."""
+    """Allow the supported client-id scalar only on the step that supplies it."""
     ignored = set()
-    for report in diagnostics:
-        if not report["message"].startswith(UNKNOWN_CLIENT_ID):
-            continue
-        path, number = report["filepath"], report["line"]
-        lines = Path(path).read_text().splitlines()
-        match = re.match(r"^([ ]+)client-id:\s*(\S.*)$", lines[number - 1])
-        if not match or match[2] in {"''", '""', "null", "~"}:
-            continue
-        indent = len(match[1]) - 2
-        with_index = next(
-            (i for i in range(number - 2, -1, -1)
-             if lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) <= indent),
-            None,
-        )
-        if with_index is None or lines[with_index].strip() != "with:":
-            continue
-        for i in range(with_index - 1, -1, -1):
-            line = lines[i]
-            if line.strip().removeprefix("- ") == f"uses: {TOKEN_ACTION}":
-                ignored.add((path, number, UNKNOWN_CLIENT_ID))
-                ignored.add((path, i + 1, MISSING_APP_ID))
-                break
-            if line.lstrip().startswith("- "):
-                break
+    paths = {
+        report["filepath"] for report in diagnostics
+        if report["message"].startswith(UNKNOWN_CLIENT_ID)
+    }
+    for path in paths:
+        pairs = subprocess.check_output([
+            "ruby", "-rpsych", "-rjson", "-e", WORKFLOW_TOKEN_INPUTS, path, TOKEN_ACTION,
+        ])
+        for use_line, input_line in json.loads(pairs):
+            ignored.add((path, use_line, MISSING_APP_ID))
+            ignored.add((path, input_line, UNKNOWN_CLIENT_ID))
     return ignored
+
+
+def validate_composite_actions(controls):
+    for filename in sorted(controls):
+        path = Path(filename)
+        if not filename.startswith(".github/actions/") or path.name not in {"action.yml", "action.yaml"}:
+            continue
+        if not path.is_file():
+            continue
+        data = subprocess.check_output([
+            "ruby", "-rpsych", "-rjson", "-e",
+            'puts JSON.generate(Psych.safe_load(File.read(ARGV.fetch(0)), aliases: true))',
+            filename,
+        ])
+        action = json.loads(data)
+        runs = action["runs"]
+        if runs["using"] != "composite":
+            continue
+        for index, step in enumerate(runs["steps"], 1):
+            if "run" not in step:
+                continue
+            source = re.sub(r"\$\{\{.*?\}\}", "github_expression", step["run"], flags=re.DOTALL)
+            shell = Path(step["shell"].split()[0]).name
+            label = f"{filename} step {index}"
+            if shell in {"bash", "sh"}:
+                subprocess.run([shell, "-n", "-c", source, label], check=True)
+            elif shell == "python":
+                ast.parse(source, filename=label)
 
 
 def lint_workflows(controls):
@@ -124,9 +165,16 @@ def run_contracts(controls):
                 subprocess.run(command, check=True)
 
 
-selection = json.loads(Path(sys.argv[1]).read_text())
-controls = set(selection["controls"])
-lint_workflows(controls)
-validate_local_files(controls, selection["scripts"])
-subprocess.run([sys.executable, "-B", ".github/ci/test_scope.py"], check=True)
-run_contracts(controls)
+def main():
+    selection = json.loads(Path(sys.argv[1]).read_text())
+    controls = set(selection["controls"])
+    lint_workflows(controls)
+    validate_composite_actions(controls)
+    validate_local_files(controls, selection["scripts"])
+    for tests in ("test_scope.py", "test_verify.py"):
+        subprocess.run([sys.executable, "-B", f".github/ci/{tests}"], check=True)
+    run_contracts(controls)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,53 @@
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+from verify import TOKEN_ACTION, MISSING_APP_ID, UNKNOWN_CLIENT_ID
+from verify import legacy_token_diagnostics, validate_composite_actions
+
+
+class VerificationDefinitionTest(unittest.TestCase):
+    def test_only_nonempty_client_ids_suppress_the_step_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = Path(directory, "workflow.yml")
+            for value, accepted in (
+                ("# no ID", False),
+                (">-", False),
+                ("'' # no ID", False),
+                ("Iv1.example", True),
+            ):
+                with self.subTest(value=value):
+                    # Mapping order is unrelated to the meaning of the step.
+                    workflow.write_text(
+                        "jobs:\n  proof:\n    steps:\n"
+                        f"      - with:\n          client-id: {value}\n"
+                        f"        uses: {TOKEN_ACTION}\n"
+                    )
+                    reports = [
+                        {"filepath": str(workflow), "line": 5, "message": UNKNOWN_CLIENT_ID},
+                        {"filepath": str(workflow), "line": 6, "message": MISSING_APP_ID},
+                    ]
+                    ignored = legacy_token_diagnostics(reports)
+                    self.assertEqual(len(ignored), 2 if accepted else 0)
+
+    def test_composite_validates_its_shell_without_executing_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = Path.cwd()
+            try:
+                os.chdir(directory)
+                action = Path(".github/actions/proof/action.yml")
+                action.parent.mkdir(parents=True)
+                prefix = "runs:\n  using: composite\n  steps:\n    - shell: bash\n"
+                action.write_text(prefix + '      run: printf "%s" "${{ inputs.value }}"\n')
+                validate_composite_actions({str(action)})
+                action.write_text(prefix + "      run: if true; then\n")
+                with self.assertRaises(subprocess.CalledProcessError):
+                    validate_composite_actions({str(action)})
+            finally:
+                os.chdir(original)
+
+
+if __name__ == "__main__":
+    unittest.main()
