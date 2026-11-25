@@ -8,6 +8,9 @@ outputs:
   product:
     description: Whether product verification is needed
     value: ${{ steps.select.outputs.product }}
+  suites:
+    description: JSON list of triggered product suites
+    value: ${{ steps.select.outputs.suites }}
 runs:
   using: composite
   steps:
@@ -28,7 +31,7 @@ runs:
     - if: inputs.validate == 'true' && steps.select.outputs.checks == 'true' && hashFiles('.github/ci/contracts.json') != ''
       uses: actions/setup-node@v7
       with:
-        node-version: '24.17.0'
+        node-version: "24.17.0"
     - if: inputs.validate == 'true' && steps.select.outputs.checks == 'true'
       shell: bash
       env:

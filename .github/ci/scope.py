@@ -1,6 +1,7 @@
 """Select check-definition and product verification from the same Git diff."""
 
 import json
+from fnmatch import fnmatchcase
 import os
 import re
 import subprocess
@@ -11,6 +12,8 @@ from pathlib import Path
 CONTROL_DIRECTORIES = (".github/workflows/", ".github/actions/", ".github/ci/", ".husky/", ".githooks/", "scripts/ci/")
 LINT_CONFIG = {".github/actionlint.yaml", ".github/actionlint.yml"}
 CONTRACTS = Path(".github/ci/contracts.json")
+SUITES = Path(".github/ci/suites.json")
+FULL = {"*"}
 CHECK_SCRIPT = re.compile(r"(?:verify|test|typecheck|lint|check)(?::[\w-]+)*|format:check|local:verify")
 OID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 SELECTION_ERRORS = (OSError, subprocess.CalledProcessError, ValueError, KeyError)
@@ -92,6 +95,15 @@ def job_condition(value):
     return condition
 
 
+def suite_condition(suite):
+    ref = "fromJSON(needs.verification-scope.outputs.suites)"
+    return f"contains({ref}, '*') || contains({ref}, '{suite}')"
+
+
+def selection_expression(suite):
+    return "${{ " + suite_condition(suite) + " }}"
+
+
 def result_gate(job, workers):
     """Check the complete result assertion before treating the job as a wrapper."""
     variables = {"PRODUCT_RESULT": workers[0]} if len(workers) == 1 else dict(zip(("BUILD", "INSTALL"), workers))
@@ -111,6 +123,19 @@ def result_gate(job, workers):
         'esac'
     )
     steps = job.get("steps", [])
+    actual = steps[0].get("env", {}) if len(steps) == 1 else {}
+    if len(workers) == 1 and actual.get("PRODUCT_SELECTED") == selection_expression(workers[0].removesuffix("-product")):
+        env["PRODUCT_SELECTED"] = actual["PRODUCT_SELECTED"]
+    if workers == ["build", "install"] and actual.get("INSTALL_SELECTED") == selection_expression("sdk"):
+        env["INSTALL_SELECTED"] = actual["INSTALL_SELECTED"]
+        command = command.replace(success, 'test "$BUILD" = success').replace(skipped, 'test "$BUILD" = skipped')
+        command += (
+            '\ncase "$INSTALL_SELECTED" in\n'
+            '  true) test "$INSTALL" = success ;;\n'
+            '  false) test "$INSTALL" = skipped ;;\n'
+            '  *) exit 1 ;;\n'
+            'esac'
+        )
     return (not job.keys() - {"name", "if", "needs", "runs-on", "timeout-minutes", "steps"}
             and job.get("if") == "always()" and job.get("needs") == ["verification-scope", *workers]
             and len(steps) == 1 and not steps[0].keys() - {"name", "env", "run"}
@@ -125,9 +150,15 @@ def validate_result_gates(document, workflow=None):
             gate = worker.removesuffix("-product")
             if not result_gate(jobs.get(gate, {}), [worker]):
                 raise ValueError(f"Invalid required result gate for {worker}: {gate}")
+            selected = jobs[gate]["steps"][0]["env"]["PRODUCT_SELECTED"]
+            if selected == selection_expression(gate) and jobs[worker].get("if") != suite_condition(gate):
+                raise ValueError(f"Suite selection mismatch for {worker}: {gate}")
     if workflow == ".github/workflows/sdk-ci.yml":
         if not result_gate(jobs.get("required", {}), ["build", "install"]):
             raise ValueError("Invalid SDK qualification result gate")
+        sdk = jobs["required"]["steps"][0]["env"].get("INSTALL_SELECTED")
+        if sdk and (jobs["install"].get("needs") != ["verification-scope", "build"] or jobs["install"].get("if") != suite_condition("sdk")):
+            raise ValueError("SDK installation selection mismatch")
 
 
 def workflow_execution(document):
@@ -203,10 +234,47 @@ def workflow_needs_product(workflow, controls, scripts, before, head):
         return True
 
 
+def load_suites(revision):
+    policy = json.loads(git("show", f"{revision}:{SUITES}"))
+    if not isinstance(policy, dict) or set(policy) != {"suites", "review_only", "release_branches"}:
+        raise ValueError("Invalid hosted verification policy")
+    suites = policy["suites"]
+    patterns = [policy["review_only"], policy["release_branches"]]
+    if not isinstance(suites, dict) or not suites:
+        raise ValueError("Missing hosted verification suites")
+    for name, inputs in suites.items():
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", name) or not inputs:
+            raise ValueError("Invalid hosted verification suite")
+        patterns.append(inputs)
+    for inputs in patterns:
+        if not isinstance(inputs, list) or any(
+            not isinstance(pattern, str) or not pattern for pattern in inputs
+        ):
+            raise ValueError("Invalid hosted verification paths")
+    return policy
+
+
+def affected_suites(paths, controls, policy):
+    selected = set()
+    for path in sorted(paths):
+        matches = {
+            suite for suite, inputs in policy["suites"].items()
+            if any(fnmatchcase(path, pattern) for pattern in inputs)
+        }
+        if matches:
+            selected.update(matches)
+        elif path not in controls and not any(
+            fnmatchcase(path, pattern) for pattern in policy["review_only"]
+        ):
+            print(f"No hosted test owner for {path}; select full verification.")
+            return FULL
+    return selected
+
+
 def github_selection():
     event = os.environ["GITHUB_EVENT_NAME"]
     if event not in {"pull_request", "push"}:
-        return set(), True, set()
+        return set(), True, set(), FULL
     head = os.environ["GITHUB_SHA"]
     if event == "pull_request":
         # The checked-out merge tree includes integration effects from the actual base.
@@ -219,12 +287,27 @@ def github_selection():
             if payload["ref"].startswith("refs/heads/") and payload["ref"] != default_ref:
                 default_tip = f"refs/remotes/origin/{payload['repository']['default_branch']}"
                 before = git("merge-base", default_tip, head).decode().strip()
-    controls, product, scripts = classify(changes(before, head), before, head)
+    paths = changes(before, head)
+    controls, product, scripts = classify(paths, before, head)
     workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
     workflow = workflow_ref.split("/", 2)[-1].split("@", 1)[0]
-    if not product and workflow:
-        product = workflow_needs_product(workflow, controls, scripts, before, head)
-    return controls, product, scripts
+    if not SUITES.is_file():
+        selected = FULL if paths and (product or (workflow and workflow_needs_product(workflow, controls, scripts, before, head))) else set()
+        return controls, bool(selected), scripts, selected
+
+    policy = load_suites(head)
+    branch = (os.environ.get("GITHUB_BASE_REF") if event == "pull_request"
+              else os.environ.get("GITHUB_REF", payload.get("ref", "")).removeprefix("refs/heads/"))
+    if branch in policy["release_branches"] or (event == "push" and branch == "main"):
+        return controls, True, scripts, FULL
+
+    selected = affected_suites(paths, controls, policy)
+    if str(SUITES) in paths and paths - controls - {"AGENTS.md", "CLAUDE.md"}:
+        print("Hosted test ownership and product inputs changed together; select full verification.")
+        selected = FULL
+    if workflow and controls and workflow_needs_product(workflow, controls, scripts, before, head):
+        selected = FULL
+    return controls, bool(selected), scripts, selected
 
 
 def pre_push_controls(remote, updates):
@@ -260,10 +343,10 @@ def main():
     if mode != "github":
         raise ValueError(f"Unknown verification scope: {mode}")
     try:
-        controls, product, scripts = github_selection()
+        controls, product, scripts, suites = github_selection()
     except SELECTION_ERRORS:
         print("Git comparison unavailable. Select product verification.")
-        controls, product, scripts = set(), True, set()
+        controls, product, scripts, suites = set(), True, set(), FULL
 
     workflow = any(
         path.startswith((".github/workflows/", ".github/actions/")) or path in LINT_CONFIG
@@ -273,7 +356,8 @@ def main():
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
         for key, selected in (("product", product), ("checks", bool(controls)), ("workflows", workflow)):
             print(f"{key}={str(selected).lower()}", file=output)
-    print(f"Selected product verification: {product}; check-definition paths: {len(controls)}")
+        print(f"suites={json.dumps(sorted(suites))}", file=output)
+    print(f"Selected hosted suites: {sorted(suites)}; check-definition paths: {len(controls)}")
     return 0
 
 

@@ -18,6 +18,7 @@ jobs:
       contents: read
     outputs:
       product: ${{ steps.scope.outputs.product }}
+      suites: ${{ steps.scope.outputs.suites }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -44,7 +45,9 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+        if: contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk')
       - uses: actions/cache@v5
+        if: contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk')
         with:
           path: |
             .verification
@@ -52,18 +55,25 @@ jobs:
           restore-keys: sdk-verify-${{ runner.os }}-24.17.0-
           key: sdk-verify-${{ runner.os }}-24.17.0-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc', 'package.json', 'build.mjs', 'tsconfig.base.json', '.node-version', 'packages/**', 'tools/**') }}
       - run: node tools/verify.mjs build
+        if: contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk')
       - run: node tools/verify.mjs test
+        if: contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk')
       - run: node tools/verify.mjs typecheck
+        if: contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk')
       - run: node --test tools/release.test.mjs tools/find-pnpm.test.mjs tools/verification/receipts.test.mjs
+        if: contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk-tool-tests') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk')
       - run: node tools/candidate.mjs
+        if: contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk')
       - uses: actions/upload-artifact@v7
+        if: contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk')
         with:
           name: sdk-candidate
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
   install:
-    needs: build
+    needs: [verification-scope, build]
+    if: contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk')
     strategy:
       fail-fast: false
       matrix:
@@ -107,11 +117,17 @@ jobs:
           SCOPE: ${{ needs.verification-scope.result }}
           PRODUCT_SELECTED: ${{ needs.verification-scope.outputs.product }}
           BUILD: ${{ needs.build.result }}
+          INSTALL_SELECTED: ${{ contains(fromJSON(needs.verification-scope.outputs.suites), '*') || contains(fromJSON(needs.verification-scope.outputs.suites), 'sdk') }}
           INSTALL: ${{ needs.install.result }}
         run: |
           test "$SCOPE" = success || exit 1
           case "$PRODUCT_SELECTED" in
-            true) test "$BUILD" = success && test "$INSTALL" = success ;;
-            false) test "$BUILD" = skipped && test "$INSTALL" = skipped ;;
+            true) test "$BUILD" = success ;;
+            false) test "$BUILD" = skipped ;;
+            *) exit 1 ;;
+          esac
+          case "$INSTALL_SELECTED" in
+            true) test "$INSTALL" = success ;;
+            false) test "$INSTALL" = skipped ;;
             *) exit 1 ;;
           esac

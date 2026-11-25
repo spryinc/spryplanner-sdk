@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from scope import CONTRACTS, changes, classify, github_selection, git, pre_push_controls, workflow_needs_product
+from scope import CONTRACTS, FULL, affected_suites, changes, classify, github_selection, git, pre_push_controls, workflow_needs_product
 
 
 class VerificationScopeTest(unittest.TestCase):
@@ -94,7 +94,7 @@ class VerificationScopeTest(unittest.TestCase):
         self.commit()
         git("merge", "--no-ff", "-qm", "Integrate controls", "controls")
         with patch.dict(os.environ, GITHUB_EVENT_NAME="pull_request", GITHUB_SHA=git("rev-parse", "HEAD").decode().strip()):
-            self.assertEqual(github_selection(), ({".github/workflows/ci.yml"}, False, set()))
+            self.assertEqual(github_selection(), ({".github/workflows/ci.yml"}, False, set(), set()))
 
     def test_workflow_execution_changes_select_only_the_affected_workflow(self):
         ci = Path(".github/workflows/ci.yml")
@@ -150,7 +150,17 @@ class VerificationScopeTest(unittest.TestCase):
             "repository": {"default_branch": "develop"},
         }))
         with patch.dict(os.environ, GITHUB_EVENT_NAME="push", GITHUB_SHA=head, GITHUB_EVENT_PATH="event.json"):
-            self.assertEqual(github_selection(), ({".github/workflows/ci.yml"}, False, set()))
+            self.assertEqual(github_selection(), ({".github/workflows/ci.yml"}, False, set(), set()))
+
+
+class HostedSuiteTests(unittest.TestCase):
+    def test_positive_selection_and_unknown_fallback(self):
+        policy = {"suites": {"app": ["src/**"], "db": ["db/**"]}, "review_only": ["README.md"]}
+        self.assertEqual(affected_suites(set(), set(), policy), set())
+        self.assertEqual(affected_suites({"README.md", ".github/ci/suites.json"}, {".github/ci/suites.json"}, policy), set())
+        self.assertEqual(affected_suites({"src/main.ts"}, set(), policy), {"app"})
+        self.assertEqual(affected_suites({"src/main.ts", "db/001.sql"}, set(), policy), {"app", "db"})
+        self.assertEqual(affected_suites({"unowned.ts"}, set(), policy), FULL)
 
 
 if __name__ == "__main__":
