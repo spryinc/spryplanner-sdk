@@ -20,6 +20,7 @@ class VerificationScopeTest(unittest.TestCase):
         self.addCleanup(patch.stopall)
         # Git hooks can export repository paths. Use our synthetic repository.
         patch.dict(os.environ).start()
+        os.environ.pop("GITHUB_WORKFLOW_REF", None)
         for key in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"):
             os.environ.pop(key, None)
         git("init", "-q", "-b", "develop")

@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 
 from verify import TOKEN_ACTION, MISSING_APP_ID, UNKNOWN_CLIENT_ID
-from verify import legacy_token_diagnostics, require_contract_matches, validate_composite_actions
+from verify import legacy_token_diagnostics, owned_package_scripts, require_contract_matches, validate_composite_actions
+from scope import validate_result_gates, yaml_data
 
 
 class VerificationDefinitionTest(unittest.TestCase):
@@ -43,6 +44,42 @@ class VerificationDefinitionTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 require_contract_matches(pattern, output)
 
+
+    def test_edited_scripts_must_have_an_executable_owner(self):
+        workflow = {"jobs": {"check": {"steps": [{"run": "pnpm run verify"}]}}}
+        commands = {"verify": "pnpm run test && pnpm run lint", "test": "node --test",
+                    "lint": "eslint .", "verify:pre-push": "pnpm run verify"}
+        self.assertEqual(owned_package_scripts(workflow, commands), {"verify", "test", "lint"})
+
+    def test_required_result_gate_cannot_accept_failure(self):
+        document = yaml_data(b"""
+jobs:
+  verify-product: {}
+  verify:
+    if: always()
+    needs: [verification-scope, verify-product]
+    steps:
+      - env:
+          SCOPE: ${{ needs.verification-scope.result }}
+          PRODUCT_SELECTED: ${{ needs.verification-scope.outputs.product }}
+          PRODUCT_RESULT: ${{ needs.verify-product.result }}
+        run: |
+          test "$SCOPE" = success || exit 1
+          case "$PRODUCT_SELECTED" in
+            true) test "$PRODUCT_RESULT" = success ;;
+            false) test "$PRODUCT_RESULT" = skipped ;;
+            *) exit 1 ;;
+          esac
+""")
+        validate_result_gates(document)
+        gate = document["jobs"]["verify"]
+        gate["continue-on-error"] = "true"
+        with self.assertRaises(ValueError):
+            validate_result_gates(document)
+        del gate["continue-on-error"]
+        gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('test "$PRODUCT_RESULT" = success', "true")
+        with self.assertRaises(ValueError):
+            validate_result_gates(document)
 
     def test_composite_validates_its_shell_without_executing_it(self):
         with tempfile.TemporaryDirectory() as directory:

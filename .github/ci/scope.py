@@ -92,13 +92,51 @@ def job_condition(value):
     return condition
 
 
+def result_gate(job, workers):
+    """Check the complete result assertion before treating the job as a wrapper."""
+    variables = {"PRODUCT_RESULT": workers[0]} if len(workers) == 1 else dict(zip(("BUILD", "INSTALL"), workers))
+    scoped_env = {
+        "SCOPE": "${{ needs.verification-scope.result }}",
+        "PRODUCT_SELECTED": "${{ needs.verification-scope.outputs.product }}",
+    }
+    env = {**scoped_env, **{key: f"${{{{ needs.{value}.result }}}}" for key, value in variables.items()}}
+    success = " && ".join(f'test "${key}" = success' for key in variables)
+    skipped = " && ".join(f'test "${key}" = skipped' for key in variables)
+    command = (
+        'test "$SCOPE" = success || exit 1\n'
+        'case "$PRODUCT_SELECTED" in\n'
+        f'  true) {success} ;;\n'
+        f'  false) {skipped} ;;\n'
+        '  *) exit 1 ;;\n'
+        'esac'
+    )
+    steps = job.get("steps", [])
+    return (not job.keys() - {"name", "if", "needs", "runs-on", "timeout-minutes", "steps"}
+            and job.get("if") == "always()" and job.get("needs") == ["verification-scope", *workers]
+            and len(steps) == 1 and not steps[0].keys() - {"name", "env", "run"}
+            and steps[0].get("env") == env
+            and steps[0].get("run", "").strip() == command)
+
+
+def validate_result_gates(document):
+    jobs = document.get("jobs", {})
+    for worker in jobs:
+        if worker.endswith("-product"):
+            gate = worker.removesuffix("-product")
+            if not result_gate(jobs.get(gate, {}), [worker]):
+                raise ValueError(f"Invalid required result gate for {worker}: {gate}")
+    if "install" in jobs and jobs.get("required", {}).get("name") == "SDK qualification gate":
+        if not result_gate(jobs["required"], ["build", "install"]):
+            raise ValueError("Invalid SDK qualification result gate")
+
+
 def workflow_execution(document):
     """Compare worker definitions after removing the known selector wiring."""
     document = dict(document)
     jobs = document.pop("jobs")
     wrappers = {
         job_id for job_id, job in jobs.items()
-        if f"{job_id}-product" in jobs and job.get("needs") == ["verification-scope", f"{job_id}-product"]
+        if f"{job_id}-product" in jobs and result_gate(job, [f"{job_id}-product"])
     }
     workers = {}
     for job_id, definition in jobs.items():
@@ -110,8 +148,10 @@ def workflow_execution(document):
         if isinstance(needs, str):
             needs = [needs]
         needs = [name for name in needs if name != "verification-scope"]
-        if job_id == "required" and job.get("name") == "SDK qualification gate" and needs == ["build", "install"]:
-            continue
+        if job_id == "required" and job.get("name") == "SDK qualification gate":
+            legacy = definition.get("needs") == ["build", "install"]
+            if (legacy or result_gate(definition, ["build", "install"])) and needs == ["build", "install"]:
+                continue
         if needs:
             job["needs"] = needs
         condition = job_condition(job.pop("if", None))

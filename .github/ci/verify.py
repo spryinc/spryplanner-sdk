@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scope import CONTRACTS, LINT_CONFIG, yaml_data
+from scope import CONTRACTS, LINT_CONFIG, validate_result_gates, workflow_execution, yaml_data
 
 
 TOKEN_ACTION = "actions/create-github-app-token@v3"
@@ -92,6 +92,11 @@ def lint_workflows(controls):
         workflows.update(str(path) for path in Path(".github/workflows").glob("*.y*ml"))
     workflows = sorted(path for path in workflows if Path(path).is_file())
     if workflows:
+        for workflow in workflows:
+            try:
+                validate_result_gates(yaml_data(Path(workflow).read_bytes()))
+            except ValueError as error:
+                raise SystemExit(f"{workflow}: {error}") from error
         if not shutil.which("shellcheck"):
             raise SystemExit("ShellCheck is required to validate workflow shell syntax")
         result = subprocess.run([
@@ -135,6 +140,50 @@ def validate_local_files(controls, scripts):
         for entry in staged.values():
             for command in entry if isinstance(entry, list) else [entry]:
                 subprocess.run(["sh", "-n", "-c", command], check=True)
+
+
+SCRIPT_CALL = re.compile(
+    r"(?:^|&&|\|\||;|\n)\s*(?:[A-Z_][A-Z_0-9]*=[^\s]+\s+)*(?:corepack\s+)?"
+    r"(?:pnpm|npm)\s+(?:(?:run|run-script)\s+)?([\w:-]+)"
+)
+
+
+def owned_package_scripts(document, commands):
+    _, workers = workflow_execution(document)
+    pending = [
+        name for job in workers.values() for step in job.get("steps", [])
+        if not job.get("if") and not step.get("if") and not step.get("working-directory")
+        and not job.get("defaults", {}).get("run", {}).get("working-directory")
+        for name in SCRIPT_CALL.findall(step.get("run", ""))
+    ]
+    owned = set()
+    while pending:
+        name = pending.pop()
+        if name in commands and name not in owned:
+            owned.add(name)
+            pending.extend(SCRIPT_CALL.findall(commands[name]))
+    return owned
+
+
+def validate_script_owners(scripts):
+    if not scripts or not os.environ.get("GITHUB_WORKFLOW_REF"):
+        return
+    workflow = os.environ["GITHUB_WORKFLOW_REF"].split("/", 2)[-1].split("@", 1)[0]
+    manifest = json.loads(Path("package.json").read_text())
+    commands = manifest.get("scripts", {})
+    existing = set(scripts) & commands.keys()
+    if not existing:
+        return
+    direct_contracts = set()
+    if CONTRACTS.is_file():
+        direct_contracts = {
+            command[2] for command in json.loads(CONTRACTS.read_text()).get("package.json", [])
+            if len(command) >= 3 and command[0] in {"pnpm", "npm"} and command[1] == "run"
+        }
+    unowned = existing - owned_package_scripts(yaml_data(Path(workflow).read_bytes()), commands) - direct_contracts
+    if unowned:
+        names = ", ".join(sorted(unowned))
+        raise SystemExit(f"Changed package checks need an executable hosted job or package.json contract: {names}")
 
 
 def root_locked_version(package):
@@ -201,6 +250,7 @@ def main():
     lint_workflows(controls)
     validate_composite_actions(controls)
     validate_local_files(controls, selection["scripts"])
+    validate_script_owners(selection["scripts"])
     format_changed_controls(controls)
     for tests in ("test_scope.py", "test_verify.py"):
         subprocess.run([sys.executable, "-B", f".github/ci/{tests}"], check=True)
