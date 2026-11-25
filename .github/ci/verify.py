@@ -3,11 +3,48 @@
 import ast
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from scope import CONTRACTS, LINT_CONFIG
+
+
+TOKEN_ACTION = "actions/create-github-app-token@v3"
+MISSING_APP_ID = f'missing input "app-id" which is required by action "{TOKEN_ACTION}"'
+UNKNOWN_CLIENT_ID = f'input "client-id" is not defined in action "{TOKEN_ACTION}"'
+
+
+def legacy_token_diagnostics(diagnostics):
+    """Allow the supported client-id input only on the step that supplies it."""
+    ignored = set()
+    for report in diagnostics:
+        if not report["message"].startswith(UNKNOWN_CLIENT_ID):
+            continue
+        path, number = report["filepath"], report["line"]
+        lines = Path(path).read_text().splitlines()
+        match = re.match(r"^([ ]+)client-id:\s*(\S.*)$", lines[number - 1])
+        if not match or match[2] in {"''", '""', "null", "~"}:
+            continue
+        indent = len(match[1]) - 2
+        with_index = next(
+            (i for i in range(number - 2, -1, -1)
+             if lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) <= indent),
+            None,
+        )
+        if with_index is None or lines[with_index].strip() != "with:":
+            continue
+        for i in range(with_index - 1, -1, -1):
+            line = lines[i]
+            if line.strip().removeprefix("- ") == f"uses: {TOKEN_ACTION}":
+                ignored.add((path, number, UNKNOWN_CLIENT_ID))
+                ignored.add((path, i + 1, MISSING_APP_ID))
+                break
+            if line.lstrip().startswith("- "):
+                break
+    return ignored
 
 
 def lint_workflows(controls):
@@ -19,13 +56,25 @@ def lint_workflows(controls):
         workflows.update(str(path) for path in Path(".github/workflows").glob("*.y*ml"))
     workflows = sorted(path for path in workflows if Path(path).is_file())
     if workflows:
-        # v1.7.12's metadata predates the supported v3 client-id input.
-        subprocess.run([
-            os.environ.get("ACTIONLINT", "actionlint"), "-shellcheck=", "-pyflakes=",
-            "-ignore", 'missing input "app-id" which is required by action "actions/create-github-app-token@v3"',
-            "-ignore", 'input "client-id" is not defined in action "actions/create-github-app-token@v3"',
+        if not shutil.which("shellcheck"):
+            raise SystemExit("ShellCheck is required to validate workflow shell syntax")
+        result = subprocess.run([
+            os.environ.get("ACTIONLINT", "actionlint"), "-pyflakes=", "-format", "{{json .}}",
             *workflows,
-        ], check=True)
+        ], env={**os.environ, "SHELLCHECK_OPTS": "--severity=error"}, text=True, stdout=subprocess.PIPE)
+        if result.returncode not in {0, 1} or (result.returncode and not result.stdout):
+            result.check_returncode()
+        reports = json.loads(result.stdout or "[]")
+        ignored = legacy_token_diagnostics(reports)
+        failures = [
+            item for item in reports
+            if not any(item["filepath"] == path and item["line"] == line and item["message"].startswith(message)
+                       for path, line, message in ignored)
+        ]
+        if failures:
+            for item in failures:
+                print(f"{item['filepath']}:{item['line']}:{item['column']}: {item['message']}", file=sys.stderr)
+            raise SystemExit(1)
 
 
 def validate_local_files(controls, scripts):

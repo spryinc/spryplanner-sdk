@@ -43,15 +43,15 @@ def package_changes(before, after):
     return check_only, check_scripts, lint_staged_changed
 
 
-def registered_check_paths():
+def registered_check_paths(revision):
     try:
-        return json.loads(CONTRACTS.read_text()).keys() - {"package.json"}
-    except (OSError, ValueError, AttributeError):
+        return json.loads(git("show", f"{revision}:{CONTRACTS}")).keys() - {"package.json"}
+    except SELECTION_ERRORS + (AttributeError,):
         return set()
 
 
 def classify(paths, before, after):
-    registered = LINT_CONFIG | registered_check_paths()
+    registered = LINT_CONFIG | (registered_check_paths(before) & registered_check_paths(after))
     controls = {path for path in paths if path.startswith(CONTROL_DIRECTORIES) or path in registered}
     product_paths = paths - controls
     scripts = set()

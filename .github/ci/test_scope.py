@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from scope import changes, classify, github_selection, git, pre_push_controls
+from scope import CONTRACTS, changes, classify, github_selection, git, pre_push_controls
 
 
 class VerificationScopeTest(unittest.TestCase):
@@ -76,6 +76,13 @@ class VerificationScopeTest(unittest.TestCase):
         self.assertTrue(pre_push_controls("origin", update))
         self.assertTrue(pre_push_controls("origin", f"refs/heads/checks {checks} refs/heads/checks {'0' * 40}"))
         self.assertFalse(pre_push_controls("origin", f"{update}\nrefs/heads/mixed {mixed} refs/heads/mixed {self.base}"))
+
+    def test_a_new_registration_cannot_skip_product_verification(self):
+        CONTRACTS.parent.mkdir(exist_ok=True)
+        CONTRACTS.write_text(json.dumps({"app.js": []}))
+        Path("app.js").write_text("export const current = 2;\n")
+        git("add", "--all")
+        self.assertEqual(classify(changes("--cached"), "HEAD", ""), ({str(CONTRACTS)}, True, set()))
 
     def test_pull_request_compares_the_integration_tree_to_its_base(self):
         git("switch", "-qc", "controls")
