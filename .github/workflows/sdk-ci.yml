@@ -13,7 +13,7 @@ jobs:
   verification-scope:
     name: Check verification changes
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     permissions:
       contents: read
     outputs:
