@@ -10,7 +10,27 @@ concurrency:
   group: sdk-ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  verification-scope:
+    name: Check verification changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      product: ${{ steps.scope.outputs.product }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        uses: ./.github/actions/verification-scope
+        with:
+          validate: "true"
+
   build:
+    needs: verification-scope
+    if: needs.verification-scope.outputs.product == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -80,10 +100,18 @@ jobs:
   required:
     name: SDK qualification gate
     if: always()
-    needs: [build, install]
+    needs: [verification-scope, build, install]
     runs-on: ubuntu-latest
     steps:
       - env:
+          SCOPE: ${{ needs.verification-scope.result }}
+          PRODUCT_SELECTED: ${{ needs.verification-scope.outputs.product }}
           BUILD: ${{ needs.build.result }}
           INSTALL: ${{ needs.install.result }}
-        run: test "$BUILD" = success && test "$INSTALL" = success
+        run: |
+          test "$SCOPE" = success || exit 1
+          case "$PRODUCT_SELECTED" in
+            true) test "$BUILD" = success && test "$INSTALL" = success ;;
+            false) test "$BUILD" = skipped && test "$INSTALL" = skipped ;;
+            *) exit 1 ;;
+          esac
