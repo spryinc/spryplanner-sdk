@@ -13,3 +13,12 @@ receipts when actual inputs/outputs match. --force-rerun deliberately reexecutes
 Installation, external API and deployed acceptance always require fresh evidence.
 The npm bootstrap placeholder is not an SDK release; staged content requires
 separate explicit approval before becoming available. Do not unpublish routinely.
+
+## Verification selection
+
+Every new GitHub, local hook, or other verification check must opt in. Register
+the source, fixture, configuration, and dependency inputs that require it.
+Run the check only for an affected input or an explicitly requested scope.
+Cover an affected case and an unrelated case in the existing selector fixtures.
+Required result checks may report an empty selection. They must not run
+unselected tests, builds, or validators.
