@@ -1,5 +1,6 @@
 """Select check-definition and product verification from the same Git diff."""
 
+from importlib import invalidate_caches
 import json
 from fnmatch import fnmatchcase
 import os
@@ -70,7 +71,23 @@ def classify(paths, before, after):
     return controls, not controls or bool(product_paths), scripts
 
 
+# Supports deferred PyYAML installation in GitHub Actions.
+def install_pinned_yaml(target):
+    if not (Path(target) / "yaml" / "__init__.py").is_file():
+        try:
+            subprocess.run(
+                (sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                 "--target", target, "PyYAML==6.0.3"),
+                check=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise RuntimeError("Cannot install the pinned workflow YAML parser") from error
+        invalidate_caches()
+
+
 def yaml_data(source):
+    if target := os.environ.get("SPRY_CI_YAML_TARGET"):
+        install_pinned_yaml(target)
     import yaml
 
     return yaml.load(source, Loader=yaml.BaseLoader)

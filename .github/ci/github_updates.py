@@ -35,13 +35,17 @@ EXECUTE_STEP = "Execute selected suite"
 TESTED_HEAD = 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"'
 REUSE_STEP = "Record matching runner inputs"
 MISMATCH_STEP = "Record different runner inputs"
+DEFAULT_WAIT_MINUTES = 10
+GATE_OVERHEAD_MINUTES = 2
+POLL_SECONDS = 30
+LOOKUP_TIMEOUT = 25
 
 
-def api(path, **query):
+def api(path, *, timeout=LOOKUP_TIMEOUT, **query):
     url = f"repos/{os.environ['GITHUB_REPOSITORY']}/{path}"
     if query:
         url += "?" + urlencode(query)
-    raw = subprocess.check_output(("gh", "api", url), timeout=25)
+    raw = subprocess.check_output(("gh", "api", url), timeout=timeout)
     return json.loads(raw)
 
 
@@ -64,6 +68,22 @@ def verify_environment(expected):
         print("Running live verification with different tools. This result is ineligible for carry-forward.")
 
 
+def workflow_path():
+    prefix = os.environ["GITHUB_REPOSITORY"] + "/"
+    workflow_ref = os.environ["GITHUB_WORKFLOW_REF"]
+    path = workflow_ref.removeprefix(prefix).split("@", 1)[0]
+    if not workflow_ref.startswith(prefix) or not WORKFLOW_PATH.fullmatch(path):
+        raise ValueError("Expected the current repository's workflow reference")
+    return path
+
+
+def wait_minutes(profile):
+    budget = profile.get("wait_minutes", DEFAULT_WAIT_MINUTES)
+    if type(budget) is not int or not 1 <= budget <= 360 - GATE_OVERHEAD_MINUTES:
+        raise ValueError("Hosted wait_minutes must fit within a GitHub Actions job")
+    return budget
+
+
 def hosted_suites(policy, workflow=WORKFLOW):
     hosted = policy.get("hosted")
     if not isinstance(hosted, dict) or hosted.keys() != policy["suites"].keys():
@@ -74,11 +94,12 @@ def hosted_suites(policy, workflow=WORKFLOW):
     for path, profile in profiles.items():
         if (not isinstance(path, str) or not WORKFLOW_PATH.fullmatch(path) or path == CANDIDATE
                 or not isinstance(profile, dict) or not {"gate", "name"} <= profile.keys()
-                or profile.keys() - {"gate", "name", "events"}
+                or profile.keys() - {"gate", "name", "events", "wait_minutes"}
                 or not isinstance(profile["gate"], str) or not SUITE.fullmatch(profile["gate"])
                 or profile["gate"] in {"verification-scope", "tested-candidate"}
                 or not isinstance(profile["name"], str) or not profile["name"].strip()):
             raise ValueError(f"Invalid hosted workflow registration for {path}")
+        wait_minutes(profile)
         if "events" in profile:
             events = profile["events"]
             if (not isinstance(events, list) or not events
@@ -325,11 +346,7 @@ def route(selected):
     tested = os.environ["GITHUB_SHA"]
     if git("rev-parse", "HEAD").decode().strip() != tested:
         raise ValueError("Workflow and checkout must match the routed candidate")
-    prefix = os.environ["GITHUB_REPOSITORY"] + "/"
-    workflow_ref = os.environ["GITHUB_WORKFLOW_REF"]
-    path = workflow_ref.removeprefix(prefix).split("@", 1)[0]
-    if not workflow_ref.startswith(prefix) or not WORKFLOW_PATH.fullmatch(path):
-        raise ValueError("Expected the current repository's workflow reference")
+    path = workflow_path()
     policy = load_suites(tested)
     hosted = hosted_suites(policy, path)
     profile = policy.get("hosted_workflows", DEFAULT_WORKFLOWS)[path]
@@ -370,7 +387,7 @@ def route(selected):
         observations.extend(earlier_attempt_results(run, int(payload["number"]), attempt, current, environment, groups))
     observations = [proof for proof in observations if proof.scope not in fresh]
     retry = (scopes | set(obligations)) & fresh
-    if update and previous is None and same_repo and payload.get("before"):
+    if attempt == 1 and update and previous is None and same_repo and payload.get("before"):
         before = payload["before"]
         if OID.fullmatch(before) and acquire_commit(before):
             # An edit to the execution definition itself qualifies the affected worker.
@@ -409,13 +426,23 @@ def route(selected):
           f"wait {list(decision.wait)}; unresolved {decision.unresolved}.")
 
 
-def wait_for_results(records, *, timeout=600, delay=time.sleep):
+def wait_for_results(records, *, timeout=DEFAULT_WAIT_MINUTES * 60, delay=time.sleep):
     deadline = time.monotonic() + timeout
+    def remaining_time():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError("Timed out waiting for existing verification jobs")
+        return remaining
+
     while records:
         pending = []
-        jobs = {job_id: api(f"actions/jobs/{job_id}") for job_id in {int(proof["job"]) for proof in records}}
+        jobs = {}
         for proof in records:
-            job = jobs[proof["job"]]
+            job_id = int(proof["job"])
+            if job_id not in jobs:
+                jobs[job_id] = api(f"actions/jobs/{job_id}", timeout=min(LOOKUP_TIMEOUT, remaining_time()))
+                remaining_time()
+            job = jobs[job_id]
             if (job["id"], job["run_id"], job["run_attempt"], job["name"]) != (
                     proof["job"], proof["run"], proof["attempt"], proof["name"]):
                 raise ValueError("Earlier job identity changed")
@@ -425,10 +452,15 @@ def wait_for_results(records, *, timeout=600, delay=time.sleep):
             elif state != "success":
                 raise ValueError(f"Earlier job {job['id']} did not finish successfully")
         if pending:
-            if time.monotonic() >= deadline:
-                raise ValueError("Timed out waiting for existing verification jobs")
-            delay(15)
+            delay(min(POLL_SECONDS, remaining_time()))
         records = pending
+
+
+def wait_for_hosted_results(records):
+    path = workflow_path()
+    policy = load_suites(os.environ["GITHUB_SHA"])
+    profile = policy.get("hosted_workflows", DEFAULT_WORKFLOWS)[path]
+    wait_for_results(records, timeout=wait_minutes(profile) * 60)
 
 
 def suite_paths(suite):
@@ -521,18 +553,31 @@ def validate_hosted_gate(document, policy, path=WORKFLOW):
             raise ValueError(f"Invalid suite execution wiring for {job}")
     scoped = jobs.get(scope, {})
     scope_steps = scoped.get("steps", [])
+    if len(scope_steps) == 4:
+        from validation_history import STEP
+        proof = {
+            "name": STEP + " ${{ steps.scope.outputs.definition-proof }}",
+            "if": "steps.scope.outputs.definition-proof != ''",
+            "run": "true",
+        }
     if (scoped.get("if") != route_condition
             or scoped.get("outputs") != {name: "${{ steps.route.outputs." + name + " }}"
                                  for name in expected_outputs}
-            or len(scope_steps) != 3 or not is_candidate_checkout(scope_steps[0], full=True)
+            or len(scope_steps) not in {3, 4} or not is_candidate_checkout(scope_steps[0], full=True)
             or scope_steps[1].get("uses") != "./.github/actions/verification-scope"
             or scope_steps[1].get("id") != "scope" or scope_steps[1].get("with") != {"validate": "true"}
-            or scope_steps[2].get("id") != "route" or "if" in scope_steps[2]
-            or scope_steps[2].get("env", {}).get("SELECTED") != "${{ steps.scope.outputs.suites }}"
-            or scope_steps[2].get("run") != 'python3 -B .github/ci/github_updates.py route "$SELECTED"'
+            or (len(scope_steps) == 4 and scope_steps[2] != proof)
+            or scope_steps[-1].get("id") != "route" or "if" in scope_steps[-1]
+            or scope_steps[-1].get("env", {}).get("SELECTED") != "${{ steps.scope.outputs.suites }}"
+            or scope_steps[-1].get("run") != 'python3 -B .github/ci/github_updates.py route "$SELECTED"'
             or jobs.get(marker) != {"name": "Candidate", "needs": scope, "uses": f"./{CANDIDATE}",
                                     "with": {"marker": output("marker")}}):
         raise ValueError("Invalid scoped decision or candidate workflow wiring")
+    # The required status must have time to start and run its other steps.
+    gate_timeout = str(gate.get("timeout-minutes", ""))
+    if (not re.fullmatch(r"[1-9][0-9]{0,2}", gate_timeout)
+            or not wait_minutes(profile) + GATE_OVERHEAD_MINUTES <= int(gate_timeout) <= 360):
+        raise ValueError("Invalid timeout for the hosted Verify result gate")
     steps = gate.get("steps", [])
     status = """test "$SCOPE" = success && test "$MARKER" = success || exit 1
 test "$UNRESOLVED" = '[]' || { printf 'Unresolved verification: %s\\n' "$UNRESOLVED"; exit 1; }
@@ -573,7 +618,7 @@ def is_candidate_checkout(step, *, full=False):
 if __name__ == "__main__":
     try:
         operation, value = sys.argv[1:]
-        operations = {"route": route, "wait": wait_for_results, "suite-paths": suite_paths,
+        operations = {"route": route, "wait": wait_for_hosted_results, "suite-paths": suite_paths,
                       "environment": verify_environment}
         operations[operation](value if operation == "environment" else json.loads(value))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:

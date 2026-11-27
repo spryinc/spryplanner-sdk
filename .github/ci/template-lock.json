@@ -1,15 +1,16 @@
 {
-  "revision": "147e9a8ad06897fab6d09a16f2b08c21d1556301",
+  "revision": "03e765d0351224a916b0610595d5e49e0d43bf9f",
   "files": {
-    ".github/actions/verification-scope/action.yml": "68ff1be71b1b54855bb185b8ed977f6ed1c112fc1a8419994bee9b54e5bb62c3",
+    ".github/actions/verification-scope/action.yml": "d0d914e912cfd13f088ff6f654b7aeccd1315d0ecba713420c82fbea61484df7",
     ".github/workflows/ci-candidate.yml": "5c7ea90f91e8b8d96496bddaae6708fbec6ba47c186927e8fa6a73ccd8500225",
-    ".github/ci/scope.py": "f3641ad4e9d1d856f01fd295261b1a91c19673c7d36bbb3e04e7458e1f715811",
+    ".github/ci/scope.py": "487a7a3dc311677194a4593e2d7575500e70c969c6074bf9210ebd2668cb9fc0",
     ".github/ci/updates.py": "a02cfc5349f2c0fc437272215ab8368a33231d64e6c3d80bbe431b1901c3afec",
-    ".github/ci/github_updates.py": "da0877755e42752694419432d99e1cba0734598128ec71ab2397d79c4aeeed09",
+    ".github/ci/github_updates.py": "5f431fe783ac3917c3c88ee940a57d348c024aada30a428e993afce5dff4a60d",
     ".github/ci/verify.py": "aa111e746a0172cd83e4807bbd36b0395acffc1a1542858cdf83ac384467d8ee",
-    ".github/ci/test_scope.py": "9f05ed0bc5ae1ea9831925fe8f17b80168b1a3cd6dfc72bbe6277cbc7670116b",
-    ".github/ci/test_verify.py": "3d589c9728dc2770ac00e5a2f5ccb77079c23516077a088895b589f0ba737e3b",
-    ".github/ci/template_sync.py": "844b3b1f73bc7f5b228acc70c0140aab810a43c9aacc4d50f59e55d1782b7e5e"
+    ".github/ci/test_scope.py": "e2fec27d4b4cce26af69f37cc05359b21b03eefdbb9e14d8a6037f95c9d5ea5a",
+    ".github/ci/test_verify.py": "1477b7c770b6fa6701d22b94ba832dc56ba1ee1462659587fcaae8924339095d",
+    ".github/ci/validation_history.py": "638b03dbf8932277136594617356b77079ef20f3e72eacbfec8277d4c0de0562",
+    ".github/ci/template_sync.py": "dd255b3f9caaece912cb9801103b1ef37580a6432a0f54295b3f7268189c38c2"
   },
   "adapters": [
     ".github/ci/suites.json",
@@ -20,12 +21,12 @@
     ".github/ci/github_updates.py": {
       "owner": "Planner SDK maintainers",
       "reason": "Keep SDK tarball and external installation evidence fresh whenever required.",
-      "sha256": "5378f47a023266504ca8190b9ae3c60d2dee392d8e5d81d33d169e6f986b7c00"
+      "sha256": "516be5d2d4ce59f84799393ef9adaa7a4440c03decedc799dad3f787902c417d"
     },
     ".github/ci/scope.py": {
       "owner": "Planner SDK maintainers",
       "reason": "Select package prose and the checked-out publication validator for main qualification.",
-      "sha256": "a6618cbe502d9bda79596dc0dfabf8349f03731c5709b277c742ce00b2310d97"
+      "sha256": "8e323752e55dfe259d681fcc25c390774f92cd65ca2a305512913500015859eb"
     },
     ".github/ci/verify.py": {
       "owner": "Planner SDK maintainers",
@@ -35,12 +36,12 @@
     ".github/ci/test_scope.py": {
       "owner": "Planner SDK maintainers",
       "reason": "Cover SDK source, test, tooling, install fixture, and documentation ownership.",
-      "sha256": "29dd698e9127cd5965c29ce087caabd6136288440f0f37ca8611f7bde0c74b87"
+      "sha256": "4cf06f68a802e0835775198808319b79fc2f99e77669aa3ca3a52cd4e821196c"
     },
     ".github/ci/test_verify.py": {
       "owner": "Planner SDK maintainers",
       "reason": "Exercise the SDK result gate including its installation obligation.",
-      "sha256": "cfb47352098bd6c0d806374863dab3d96b9fd867fa4feea29578ff64e5fc0573"
+      "sha256": "1d4b44e5dae3af6c69172afd4a821cc472e3811477a4db562f1093ce9d0ba0b8"
     }
   }
 }

@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from scope import CONTRACTS, FULL, affected_suites, changes, classify, github_selection, git, pre_push_controls, workflow_needs_product
+from scope import CONTRACTS, FULL, affected_suites, changes, classify, github_selection, git, pre_push_controls, workflow_needs_product, yaml_data
 from updates import ScopeSnapshot, SuiteResult, decide, snapshot
 
 
@@ -130,6 +130,79 @@ class VerificationScopeTest(unittest.TestCase):
         git("merge", "--no-ff", "-qm", "Integrate controls", "controls")
         with patch.dict(os.environ, GITHUB_EVENT_NAME="pull_request", GITHUB_SHA=git("rev-parse", "HEAD").decode().strip()):
             self.assertEqual(github_selection(), ({".github/workflows/ci.yml"}, False, set(), set()))
+
+    def test_yaml_setup_is_deferred_until_a_workflow_needs_parsing(self):
+        workflow = Path(".github/workflows/ci.yml")
+        workflow.write_text("jobs: {verification-scope: {steps: []}}\n")
+        suites = Path(".github/ci/suites.json")
+        suites.parent.mkdir()
+        suites.write_text(json.dumps({
+            "suites": {"product": ["app.js"]}, "review_only": ["README.md"], "release_branches": [],
+        }))
+        base = self.commit()
+        git("switch", "-qc", "prose")
+        Path("README.md").write_text("# Description\n")
+        self.commit()
+        git("switch", "-q", "develop")
+        git("merge", "--no-ff", "-qm", "Test prose", "prose")
+        target = str(Path.cwd() / "yaml-tool")
+        with patch.dict(os.environ, GITHUB_EVENT_NAME="pull_request",
+                        GITHUB_SHA=git("rev-parse", "HEAD").decode().strip(),
+                        GITHUB_WORKFLOW_REF="spry/example/.github/workflows/ci.yml@refs/pull/7/merge",
+                        SPRY_CI_YAML_TARGET=target), patch("scope.install_pinned_yaml") as install:
+            self.assertEqual(github_selection(), (set(), False, set(), set()))
+            install.assert_not_called()
+            self.assertFalse(workflow_needs_product(str(workflow), {str(workflow)}, set(), base, base))
+            install.assert_called_with(target)
+        parser = Path(target, "yaml", "__init__.py")
+        def make_parser(*args, **kwargs):
+            parser.parent.mkdir(parents=True)
+            parser.touch()
+        with patch.dict(os.environ, SPRY_CI_YAML_TARGET=target), patch("scope.subprocess.run", side_effect=make_parser) as pip:
+            self.assertEqual(yaml_data("name: Example"), {"name": "Example"})
+            self.assertEqual(yaml_data("name: Another"), {"name": "Another"})
+            pip.assert_called_once_with(
+                (sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                 "--target", target, "PyYAML==6.0.3"), check=True,
+            )
+
+    def test_action_installs_yaml_before_running_a_legacy_selector(self):
+        root = Path(__file__).resolve().parents[2]
+        action = yaml_data((root / ".github/actions/verification-scope/action.yml").read_bytes())
+        select = next(step["run"] for step in action["runs"]["steps"] if step.get("id") == "select")
+        selector = Path(".github/ci/scope.py")
+        selector.parent.mkdir()
+        selector.write_text(
+            "import sys, yaml\nfrom pathlib import Path\n"
+            "assert yaml.installed_by_fixture\n"
+            "if __name__ == '__main__':\n"
+            "    assert sys.argv[1] == 'github'\n"
+            "    Path(sys.argv[2]).write_text('legacy CLI ran')\n"
+        )
+        runner = Path.cwd() / "runner"
+        runner.mkdir()
+        tools = Path.cwd() / "tools"
+        tools.mkdir()
+        python = tools / "python3"
+        python.write_text(
+            '#!/bin/sh\n'
+            'if [ "$1" = -m ] && [ "$2" = pip ]; then\n'
+            '  test "$7" = PyYAML==6.0.3 || exit 1\n'
+            '  mkdir -p "$SPRY_CI_YAML_TARGET/yaml"\n'
+            '  printf "installed_by_fixture = True\\n" > "$SPRY_CI_YAML_TARGET/yaml/__init__.py"\n'
+            'else\n'
+            '  exec "$FIXTURE_PYTHON" "$@"\n'
+            'fi\n'
+        )
+        python.chmod(0o755)
+        subprocess.run(
+            ("bash", "-e", "-c", select),
+            env={**os.environ, "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+                 "FIXTURE_PYTHON": sys.executable, "GITHUB_EVENT_NAME": "pull_request",
+                 "RUNNER_TEMP": str(runner), "GITHUB_ENV": str(runner / "environment")},
+            check=True,
+        )
+        self.assertEqual((runner / "spry-verification-scope.json").read_text(), "legacy CLI ran")
 
     def test_scope_fingerprints_follow_tested_merge_changes(self):
         for directory in ("api", "db"):

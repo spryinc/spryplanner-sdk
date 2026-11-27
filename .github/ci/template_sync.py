@@ -16,7 +16,7 @@ MANAGED = {
     ".github/actions/verification-scope/action.yml": ".github/actions/verification-scope/action.yml",
     ".github/workflows/ci-candidate.yml": ".github/workflows/ci-candidate.yml",
     **{f".github/ci/{name}": f".github/ci/{name}" for name in (
-        "scope.py", "updates.py", "github_updates.py", "verify.py", "test_scope.py", "test_verify.py",
+        "scope.py", "updates.py", "github_updates.py", "verify.py", "test_scope.py", "test_verify.py", "validation_history.py",
     )},
     ".github/ci/template_sync.py": "templates/ci/sync.py",
 }

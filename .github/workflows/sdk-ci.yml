@@ -46,6 +46,9 @@ jobs:
         uses: ./.github/actions/verification-scope
         with:
           validate: "true"
+      - name: Record successful definition validation ${{ steps.scope.outputs.definition-proof }}
+        if: steps.scope.outputs.definition-proof != ''
+        run: "true"
       - id: route
         name: Decide fresh and carried verification
         env:
