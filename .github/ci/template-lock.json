@@ -1,0 +1,47 @@
+{
+  "revision": "860295c4705118dfb1ecc621b7ae428d4b0cec43",
+  "files": {
+    ".github/actions/verification-scope/action.yml": "d0d914e912cfd13f088ff6f654b7aeccd1315d0ecba713420c82fbea61484df7",
+    ".github/workflows/ci-candidate.yml": "5c7ea90f91e8b8d96496bddaae6708fbec6ba47c186927e8fa6a73ccd8500225",
+    ".github/ci/scope.py": "48a70328d28e52f676ca968d7a9bf4340b2b104decbf9ec74cda2bbae2a1f890",
+    ".github/ci/updates.py": "a02cfc5349f2c0fc437272215ab8368a33231d64e6c3d80bbe431b1901c3afec",
+    ".github/ci/github_updates.py": "5f431fe783ac3917c3c88ee940a57d348c024aada30a428e993afce5dff4a60d",
+    ".github/ci/verify.py": "aa111e746a0172cd83e4807bbd36b0395acffc1a1542858cdf83ac384467d8ee",
+    ".github/ci/test_scope.py": "1283451d244b01d01fe2e6d558338988ce4f36483e572cef56038e2436fad80b",
+    ".github/ci/test_verify.py": "eb7bd58c9debc1cc6db28a050d1c7a8592301451870c44c7988b80cc0e210eeb",
+    ".github/ci/validation_history.py": "060e537b45fedf5a1842843debcb596d851c67da1c2c71dcfb92e4567f681456",
+    ".github/ci/template_sync.py": "dd255b3f9caaece912cb9801103b1ef37580a6432a0f54295b3f7268189c38c2"
+  },
+  "adapters": [
+    ".github/ci/suites.json",
+    ".github/workflows/sdk-ci.yml",
+    ".github/workflows/typescript-sdk-release.yml"
+  ],
+  "overrides": {
+    ".github/ci/github_updates.py": {
+      "owner": "Planner SDK maintainers",
+      "reason": "Keep package and installer results fresh for changed SDK inputs and release checkout, and retain complete matching PR matrix evidence for unrelated updates.",
+      "sha256": "c79bab2c2e3bae5669afd72f20efc09da52ce5d5126bda533304d4c890493f53"
+    },
+    ".github/ci/scope.py": {
+      "owner": "Planner SDK maintainers",
+      "reason": "Select package prose and the checked-out publication validator for main qualification.",
+      "sha256": "b4e2166b18e1135279e1318414c5e5c067d975eafb655d74b6b4ff1759fedba2"
+    },
+    ".github/ci/verify.py": {
+      "owner": "Planner SDK maintainers",
+      "reason": "Preserve the independent fresh three-platform install result inside the SDK required status.",
+      "sha256": "a68c55f4b48998bf7bd2ee3707eea6ba7c363021120d0085517287eb33218554"
+    },
+    ".github/ci/test_scope.py": {
+      "owner": "Planner SDK maintainers",
+      "reason": "Cover SDK source, test, tooling, install fixture, and documentation ownership.",
+      "sha256": "7ea242a81568288f9373690c05692ab8436c523526b0321cb4108fd03a6ee3cb"
+    },
+    ".github/ci/test_verify.py": {
+      "owner": "Planner SDK maintainers",
+      "reason": "Exercise the SDK result gate including its installation obligation.",
+      "sha256": "2570b4776d98db86fabc58c9213ffa21790cec52f663bfae27a8b2d410bbfa4c"
+    }
+  }
+}

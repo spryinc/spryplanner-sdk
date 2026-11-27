@@ -1,0 +1,153 @@
+{
+  "suites": {
+    "sdk-build": [
+      "packages/sdk-typescript/src/index.ts",
+      "packages/api-contract/src/*.ts",
+      "package.json",
+      "pnpm*.yaml",
+      ".node-version",
+      ".npmrc",
+      ".nvmrc",
+      ".pnpmfile.cjs",
+      "tsconfig.base.json",
+      "packages/sdk-typescript/package.json",
+      "packages/sdk-typescript/tsconfig.json",
+      "build.mjs",
+      "tools/verify.mjs",
+      "tools/verification/receipts.mjs"
+    ],
+    "sdk-test": [
+      "packages/sdk-typescript/src/index.ts",
+      "packages/api-contract/src/*.ts",
+      "package.json",
+      "pnpm*.yaml",
+      ".node-version",
+      ".npmrc",
+      ".nvmrc",
+      ".pnpmfile.cjs",
+      "tsconfig.base.json",
+      "packages/sdk-typescript/package.json",
+      "packages/sdk-typescript/tsconfig.json",
+      "packages/sdk-typescript/src/index.test.ts",
+      "tools/verify.mjs",
+      "tools/verification/receipts.mjs"
+    ],
+    "sdk-typecheck": [
+      "packages/sdk-typescript/src/index.ts",
+      "packages/api-contract/src/*.ts",
+      "package.json",
+      "pnpm*.yaml",
+      ".node-version",
+      ".npmrc",
+      ".nvmrc",
+      ".pnpmfile.cjs",
+      "tsconfig.base.json",
+      "packages/sdk-typescript/package.json",
+      "packages/sdk-typescript/tsconfig.json",
+      "packages/sdk-typescript/src/index.test.ts",
+      "tools/verify.mjs",
+      "tools/verification/receipts.mjs"
+    ],
+    "test-release-tools": [
+      "tools/release.test.mjs",
+      "tools/release.mjs",
+      "tools/common.mjs",
+      "tools/verification/receipts.mjs",
+      ".node-version"
+    ],
+    "test-pnpm-tools": [
+      "tools/find-pnpm.test.mjs",
+      "tools/find-pnpm.mjs",
+      ".node-version",
+      "package.json"
+    ],
+    "test-receipts": [
+      "tools/verification/receipts.test.mjs",
+      "tools/verify.mjs",
+      "tools/verification/receipts.mjs",
+      ".node-version",
+      "package.json"
+    ],
+    "sdk": [
+      "packages/sdk-typescript/src/index.ts",
+      "packages/api-contract/src/*.ts",
+      "package.json",
+      "pnpm*.yaml",
+      ".node-version",
+      ".npmrc",
+      ".nvmrc",
+      ".pnpmfile.cjs",
+      "tsconfig.base.json",
+      "packages/sdk-typescript/package.json",
+      "packages/sdk-typescript/tsconfig.json",
+      "build.mjs",
+      "tools/verify.mjs",
+      "tools/verification/receipts.mjs",
+      "tools/candidate.mjs",
+      "tools/common.mjs",
+      "tools/find-pnpm.mjs",
+      "tools/qualify-install.mjs",
+      "tools/fixtures/**",
+      "packages/sdk-typescript/LICENSE",
+      "packages/sdk-typescript/NOTICE",
+      "packages/sdk-typescript/THIRD-PARTY-LICENSES",
+      "release-acceptance.json",
+      "source-export.json",
+      "evidence/**"
+    ]
+  },
+  "hosted": {
+    "sdk-build": {
+      "job": "verify-sdk",
+      "runtime": ["ubuntu-24.04", "node-24.17.0", "pnpm-11.1.2"],
+      "workflow": ".github/workflows/sdk-ci.yml"
+    },
+    "sdk-test": {
+      "job": "verify-sdk",
+      "runtime": ["ubuntu-24.04", "node-24.17.0", "pnpm-11.1.2"],
+      "workflow": ".github/workflows/sdk-ci.yml"
+    },
+    "sdk-typecheck": {
+      "job": "verify-sdk",
+      "runtime": ["ubuntu-24.04", "node-24.17.0", "pnpm-11.1.2"],
+      "workflow": ".github/workflows/sdk-ci.yml"
+    },
+    "test-release-tools": {
+      "job": "verify-sdk",
+      "runtime": ["ubuntu-24.04", "node-24.17.0", "pnpm-11.1.2"],
+      "workflow": ".github/workflows/sdk-ci.yml"
+    },
+    "test-pnpm-tools": {
+      "job": "verify-sdk",
+      "runtime": ["ubuntu-24.04", "node-24.17.0", "pnpm-11.1.2"],
+      "workflow": ".github/workflows/sdk-ci.yml"
+    },
+    "test-receipts": {
+      "job": "verify-sdk",
+      "runtime": ["ubuntu-24.04", "node-24.17.0", "pnpm-11.1.2"],
+      "workflow": ".github/workflows/sdk-ci.yml"
+    },
+    "sdk": {
+      "job": "verify-sdk",
+      "runtime": ["ubuntu-24.04", "node-24.17.0", "pnpm-11.1.2"],
+      "workflow": ".github/workflows/sdk-ci.yml",
+      "fresh": true
+    }
+  },
+  "hosted_workflows": {
+    ".github/workflows/sdk-ci.yml": {
+      "gate": "required",
+      "name": "SDK qualification gate"
+    }
+  },
+  "review_only": [
+    "*.md",
+    ".gitignore",
+    "LICENSE",
+    "NOTICE",
+    "THIRD-PARTY-LICENSES",
+    "tools/bootstrap.mjs"
+  ],
+  "release_branches": [],
+  "affected_main_push": true
+}

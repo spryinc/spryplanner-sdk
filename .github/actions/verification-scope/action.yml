@@ -1,0 +1,55 @@
+name: Verification scope
+description: Select product checks and validate affected check definitions
+inputs:
+  validate:
+    description: Run check-definition verification in the primary CI workflow
+    default: "false"
+outputs:
+  product:
+    description: Whether product verification is needed
+    value: ${{ steps.select.outputs.product }}
+  suites:
+    description: JSON list of triggered product suites
+    value: ${{ steps.select.outputs.suites }}
+  definition-proof:
+    description: Input fingerprint for successful definition validation executed in this job
+    value: ${{ steps.validation.outcome == 'success' && steps.validation-history.outputs.key || '' }}
+runs:
+  using: composite
+  steps:
+    - id: select
+      shell: bash
+      run: |
+        if [[ "$GITHUB_EVENT_NAME" == pull_request || "$GITHUB_EVENT_NAME" == push ]]; then
+          export SPRY_CI_YAML_TARGET="$RUNNER_TEMP/spry-ci-python"
+          export PYTHONPATH="$SPRY_CI_YAML_TARGET"
+          printf 'PYTHONPATH=%s\nSPRY_CI_YAML_TARGET=%s\n' "$PYTHONPATH" "$SPRY_CI_YAML_TARGET" >> "$GITHUB_ENV"
+          # Older deliberate selector overrides still expect the parser up front.
+          if ! grep -Fqx '# Supports deferred PyYAML installation in GitHub Actions.' .github/ci/scope.py; then
+            python3 -m pip install --disable-pip-version-check --target "$SPRY_CI_YAML_TARGET" PyYAML==6.0.3
+          fi
+        fi
+        python3 -B .github/ci/scope.py github "$RUNNER_TEMP/spry-verification-scope.json"
+    - id: validation-history
+      name: Check for matching definition validation
+      if: inputs.validate == 'true' && steps.select.outputs.checks == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.id == github.event.repository.id) && github.token || '' }}
+      run: python3 -B .github/ci/validation_history.py "$RUNNER_TEMP/spry-verification-scope.json"
+    - if: inputs.validate == 'true' && steps.select.outputs.workflows == 'true' && steps.validation-history.outputs.execute == 'true'
+      shell: bash
+      env:
+        GOBIN: ${{ runner.temp }}/spry-ci-tools
+      run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+    - if: inputs.validate == 'true' && steps.validation-history.outputs.execute == 'true' && hashFiles('.github/ci/contracts.json') != ''
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      with:
+        node-version: "24.17.0"
+    - id: validation
+      name: Execute check-definition validation
+      if: steps.validation-history.outputs.execute == 'true'
+      shell: bash
+      env:
+        ACTIONLINT: ${{ runner.temp }}/spry-ci-tools/actionlint
+      run: python3 -B .github/ci/verify.py "$RUNNER_TEMP/spry-verification-scope.json"
