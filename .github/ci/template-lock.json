@@ -21,7 +21,7 @@
     ".github/ci/github_updates.py": {
       "owner": "Planner SDK maintainers",
       "reason": "Keep package and installer results fresh for changed SDK inputs and release checkout, and retain complete matching PR matrix evidence for unrelated updates.",
-      "sha256": "f1bbc73b40d604a6f13792e5c2484e8a555419e144e27679c04d0705f7627fe4"
+      "sha256": "383ef150c71b7f36aa5f0ad1f53f421d6229695ebf55083c43985cef9a35c9ed"
     },
     ".github/ci/scope.py": {
       "owner": "Planner SDK maintainers",
@@ -41,7 +41,7 @@
     ".github/ci/test_verify.py": {
       "owner": "Planner SDK maintainers",
       "reason": "Exercise the SDK result gate including its installation obligation.",
-      "sha256": "99f1173ab1cae5ed14f60d4161b0c835eef25ccf41d85153fb80d9025490a606"
+      "sha256": "668ad56c3d9d012afdb8f6f4ee07f78835f1839f4f2fdcfd8d968913acc62267"
     }
   }
 }

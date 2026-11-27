@@ -53,7 +53,7 @@ class VerificationDefinitionTest(unittest.TestCase):
                  "head_repository": {"id": 7}, "pull_requests": [{"number": 4}], "status": "completed"}
         jobs = [
             {"name": f"Candidate / Tested {before_tested} for 4 [sdk] [sdk] {environment}",
-             "run_attempt": 1},
+             "run_id": 8, "run_attempt": 1, "id": 30},
             {"name": "Suites verify-sdk", "run_id": 8, "run_attempt": 1, "id": 31,
              "status": "completed", "conclusion": "success", "steps": [
                  {"name": "Record matching runner inputs", "conclusion": "success"},
@@ -62,11 +62,16 @@ class VerificationDefinitionTest(unittest.TestCase):
             *({"name": name, "run_id": 8, "run_attempt": 1, "status": "completed", "conclusion": "success"}
               for name in sorted(updates.SDK_INSTALL_JOBS)),
         ]
+        staged = {**prior, "run_attempt": 2}
+        second_attempt = [{**job, "run_attempt": 2, "id": 100 + index} for index, job in enumerate(jobs)]
+        partial = [*second_attempt[:-2], {**second_attempt[-2], "conclusion": "failure"}]
+        no_sdk = {**second_attempt[0], "name": second_attempt[0]["name"].replace("[sdk] [sdk]", "[sdk] []")}
+
         def lookup(path, **query):
             if path == "actions/runs/10":
                 return run
             if path == "actions/workflows/9/runs":
-                return {"workflow_runs": [prior]}
+                return {"workflow_runs": [staged if any(job["run_attempt"] == 2 for job in records) else prior]}
             if path == "actions/runs/8/jobs":
                 return {"jobs": records}
             if path == f"commits/{tested}/pulls":
@@ -79,6 +84,9 @@ class VerificationDefinitionTest(unittest.TestCase):
             ("duplicate matrix job", "pull_request", "synchronize", jobs + jobs[-1:], False, True, "false", '["sdk"]'),
             ("wrong attempt", "pull_request", "synchronize", [*jobs[:-1], {**jobs[-1], "run_attempt": 2}], False, True, "false", '["sdk"]'),
             ("failed matrix", "pull_request", "synchronize", [*jobs[:-1], {**jobs[-1], "conclusion": "failure"}], False, True, "false", '["sdk"]'),
+            ("newer partial matrix", "pull_request", "synchronize", [*jobs, *partial], False, True, "false", '["sdk"]'),
+            ("newer missing producer", "pull_request", "synchronize", [*jobs, second_attempt[0]], False, True, "false", '["sdk"]'),
+            ("newer skipped install", "pull_request", "synchronize", [*jobs, no_sdk], False, True, "false", "[]"),
             ("untrusted workflow", "pull_request", "synchronize", jobs, False, False, "false", '["sdk"]'),
             ("changed package", "pull_request", "synchronize", jobs, True, True, "true", "[]"),
             ("open PR", "pull_request", "opened", jobs, False, True, "true", "[]"),

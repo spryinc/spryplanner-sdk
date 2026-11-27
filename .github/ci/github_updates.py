@@ -225,19 +225,18 @@ def observed_jobs(run, jobs, candidate, groups=None, selected=None):
                                   run["run_number"], job["run_attempt"], job["id"], state)
 
 
-def sdk_install_result(run, jobs, producer):
-    """Qualify an earlier PR install only if its producer and whole matrix succeeded."""
-    if producer.state != "success":
-        return None
-    matrix = [job for job in jobs if job["name"] in SDK_INSTALL_JOBS
-              and job["run_id"] == run["id"] and job["run_attempt"] == producer.attempt]
-    if len(matrix) != len(SDK_INSTALL_JOBS) or {job["name"] for job in matrix} != SDK_INSTALL_JOBS:
-        return None
-    if any(job["status"] != "completed" for job in matrix):
-        return None
-    state = "success" if all(job["conclusion"] == "success" for job in matrix) else "failure"
-    return SuiteResult(producer.scope, producer.fingerprint, producer.context,
-                       producer.run_id, producer.run_number, producer.attempt, producer.job_id, state)
+def sdk_install_result(run, jobs, candidate, suite, marker, producers):
+    """Record the latest selected SDK attempt, including incomplete qualification."""
+    attempt = marker["run_attempt"]
+    matrix = [job for job in jobs if job["name"] in SDK_INSTALL_JOBS and job["run_id"] == run["id"]]
+    qualified = (len(producers) == 1 and producers[0].state == "success"
+                 and len(matrix) == len(SDK_INSTALL_JOBS)
+                 and {job["name"] for job in matrix} == SDK_INSTALL_JOBS
+                 and all(job["status"] == "completed" and job["conclusion"] == "success" for job in matrix))
+    proof_job = producers[0].job_id if qualified else marker["id"]
+    return SuiteResult(suite, candidate.inputs[suite], candidate.context,
+                       run["id"], run["run_number"], attempt, proof_job,
+                       "success" if qualified else "failure")
 
 
 def authenticated_revision(run, attempt, number):
@@ -338,8 +337,11 @@ def read_history(current, run, payload, head_repo, scopes, *, groups=None, path=
         for attempt, (tested, _, required, expected, environment) in sorted(markers.items(), reverse=True):
             selected = selected_marker(expected)
             jobs = [job for job in records if job["run_attempt"] == attempt]
-            possible = any(suite in current.inputs and (recorded is None or current.inputs[suite] == recorded)
-                           for job in jobs for suite, recorded, _ in worker_scopes(job, groups, selected))
+            selected_fresh = selected & fresh if preceding else set()
+            possible = selected_fresh or any(
+                suite in current.inputs and (recorded is None or current.inputs[suite] == recorded)
+                for job in jobs for suite, recorded, _ in worker_scopes(job, groups, selected)
+            )
             if not (is_previous and previous is None) and not possible:
                 continue
             if authenticated_revision(earlier, attempt, number) != tested:
@@ -353,10 +355,15 @@ def read_history(current, run, payload, head_repo, scopes, *, groups=None, path=
                 previous = old
                 obligations = selected_marker(required)
             if trusted and unchanged_controls(current.base, old.tested, path):
-                for record in observed_jobs(earlier, jobs, old, groups, selected):
-                    if record.scope in fresh:
-                        if not preceding or not (record := sdk_install_result(earlier, jobs, record)):
-                            continue
+                results = list(observed_jobs(earlier, jobs, old, groups, selected))
+                candidates = [record for record in results if record.scope not in fresh]
+                for suite in selected_fresh:
+                    markers_in_attempt = [job for job in jobs if job.get("run_id") == earlier["id"]
+                                          and MARKER.fullmatch(job["name"])]
+                    if len(markers_in_attempt) == 1:
+                        candidates.append(sdk_install_result(earlier, jobs, old, suite, markers_in_attempt[0],
+                                                            [record for record in results if record.scope == suite]))
+                for record in candidates:
                     if current.inputs.get(record.scope) == record.fingerprint:
                         observations.append(record)
                         matched.add(record.scope)
