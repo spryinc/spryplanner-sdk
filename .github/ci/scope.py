@@ -274,21 +274,42 @@ def load_suites(revision):
     return policy
 
 
+def suites_covering(path, policy):
+    return {
+        suite for suite, inputs in policy["suites"].items()
+        if any(fnmatchcase(path, pattern) for pattern in inputs)
+    }
+
+
+def review_only_path(path, policy):
+    return any(fnmatchcase(path, pattern) for pattern in policy["review_only"])
+
+
 def affected_suites(paths, controls, policy):
     selected = set()
     for path in sorted(paths):
-        matches = {
-            suite for suite, inputs in policy["suites"].items()
-            if any(fnmatchcase(path, pattern) for pattern in inputs)
-        }
+        matches = suites_covering(path, policy)
         if matches:
             selected.update(matches)
-        elif path not in controls and not any(
-            fnmatchcase(path, pattern) for pattern in policy["review_only"]
-        ):
+        elif path not in controls and not review_only_path(path, policy):
             print(f"No hosted test owner for {path}; select full verification.")
             return FULL
     return selected
+
+
+def policy_changes_with_product(paths, before, policy):
+    if not paths:
+        return False
+    try:
+        base_policy = load_suites(before)
+    except SELECTION_ERRORS + (TypeError, AttributeError):
+        return True
+    return any(
+        not path.lower().endswith(".md")
+        or not review_only_path(path, rules)
+        or suites_covering(path, rules)
+        for path in paths for rules in (base_policy, policy)
+    )
 
 
 def github_selection():
@@ -331,7 +352,9 @@ def github_selection():
     }
     if event == "push" and branch == "main" and paths & release_checkout_inputs:
         selected.add("sdk")
-    if str(SUITES) in paths and paths - controls - {"AGENTS.md", "CLAUDE.md"}:
+    if str(SUITES) in paths and policy_changes_with_product(
+        paths - controls - {"AGENTS.md", "CLAUDE.md"}, before, policy,
+    ):
         print("Hosted test ownership and product inputs changed together; select full verification.")
         selected = FULL
     if workflow and controls and workflow_needs_product(workflow, controls, scripts, before, head):

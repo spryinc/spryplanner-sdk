@@ -1,5 +1,6 @@
-"""Reuse successful definition validation on an exact GitHub Actions replay."""
+"""Carry successful definition validation for matching GitHub candidates."""
 
+from fnmatch import fnmatchcase
 from hashlib import sha256
 import json
 import os
@@ -7,8 +8,9 @@ from pathlib import Path
 import subprocess
 import sys
 
-from github_updates import api, authenticated_revision, environment_key, WORKFLOW_PATH
-from scope import CONTRACTS, git, yaml_data
+from github_updates import acquire_commit, api, authenticated_revision, checked_parent
+from github_updates import environment_key, workflow_path, WORKFLOW_PATH
+from scope import CONTRACTS, changes, classify, git, load_suites, yaml_data
 
 
 STEP = "Record successful definition validation"
@@ -87,6 +89,82 @@ def reusable_validation(tested, current_attempt, key):
     return latest, job["id"]
 
 
+def review_only_delta(previous, tested):
+    changed = changes(previous, tested)
+    if classify(changed, previous, tested)[0]:
+        return False
+    policy = load_suites(tested)
+    for filename in changed:
+        if (not filename.lower().endswith(".md")
+                or not any(fnmatchcase(filename, pattern) for pattern in policy["review_only"])
+                or any(fnmatchcase(filename, item) for paths in policy["suites"].values() for item in paths)):
+            return False
+    return True
+
+
+def reusable_previous_validation(selection, tested, key):
+    if (not key or not os.environ.get("GH_TOKEN")
+            or os.environ.get("GITHUB_JOB") != "verification-scope"
+            or os.environ.get("GITHUB_EVENT_NAME") != "pull_request"):
+        return None
+    payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
+    if payload.get("action") != "synchronize":
+        return None
+    pr = payload["pull_request"]
+    number, head, branch = pr["number"], pr["head"]["sha"], pr["head"]["ref"]
+    repo_id = int(os.environ["GITHUB_REPOSITORY_ID"])
+    workflow, workflow_ref = workflow_path(), os.environ["GITHUB_WORKFLOW_REF"]
+    if (pr["head"]["repo"]["id"] != repo_id or workflow_ref.split("@", 1)[1] != f"refs/pull/{number}/merge"
+            or checked_parent(tested, 2) != head):
+        return None
+    run_id = int(os.environ["GITHUB_RUN_ID"])
+    run = api(f"actions/runs/{run_id}")
+    if ((run["id"], run["repository"]["id"], run["head_sha"], run["event"], run["path"].split("@", 1)[0])
+            != (run_id, repo_id, head, "pull_request", workflow)):
+        return None
+    job_name = yaml_data(git("show", f"{tested}:{workflow}"))["jobs"]["verification-scope"].get(
+        "name", "verification-scope",
+    )
+    if "${{" in job_name:
+        return None
+    records = api(f"actions/workflows/{run['workflow_id']}/runs", per_page=8,
+                  branch=branch, event="pull_request")["workflow_runs"]
+    for earlier in sorted(records, key=lambda item: item["run_number"], reverse=True):
+        if (earlier["run_number"] >= run["run_number"] or earlier["head_sha"] == head
+                or earlier["repository"]["id"] != repo_id
+                or (earlier.get("head_repository") or {}).get("id") != repo_id
+                or earlier["workflow_id"] != run["workflow_id"] or earlier["path"].split("@", 1)[0] != workflow
+                or earlier["event"] != "pull_request"
+                or not any(item["number"] == number for item in earlier["pull_requests"])):
+            continue
+        # Only ancestor updates are eligible, including an unchanged tested tree.
+        ancestry = subprocess.run(("git", "merge-base", "--is-ancestor", earlier["head_sha"], head),
+                                  capture_output=True)
+        if ancestry.returncode == 1:
+            continue
+        attempt = earlier["run_attempt"]
+        if ancestry.returncode or type(attempt) is not int or attempt < 1:
+            return None
+        old = authenticated_revision(earlier, attempt, number)
+        if not old or not acquire_commit(old) or checked_parent(old, 2) != earlier["head_sha"]:
+            return None
+        if not review_only_delta(old, tested):
+            continue
+        jobs = api(f"actions/runs/{earlier['id']}/attempts/{attempt}/jobs", per_page=100)["jobs"]
+        selectors = [job for job in jobs if job["run_attempt"] == attempt
+                     and job["run_id"] == earlier["id"] and job["name"] == job_name]
+        if len(selectors) != 1 or selectors[0]["conclusion"] != "success":
+            return None
+        old_key = validation_key(selection, old, workflow_ref)
+        steps = [step["conclusion"] for step in selectors[0].get("steps", ())
+                 if step["name"] == f"{STEP} {old_key}"]
+        if steps == ["success"]:
+            return attempt, selectors[0]["id"]
+        if steps and steps != ["skipped"]:
+            return None
+    return None
+
+
 def main(selection):
     key, proof = "", None
     tested = git("rev-parse", "HEAD").decode().strip()
@@ -95,6 +173,8 @@ def main(selection):
     try:
         key = validation_key(selection, tested, os.environ["GITHUB_WORKFLOW_REF"])
         proof = reusable_validation(tested, int(os.environ["GITHUB_RUN_ATTEMPT"]), key)
+        if proof is None:
+            proof = reusable_previous_validation(selection, tested, key)
     except NO_PROOF:
         print("Prior check-definition evidence unavailable. Run the selected validation.")
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:

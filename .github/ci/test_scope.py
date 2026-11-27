@@ -131,6 +131,47 @@ class VerificationScopeTest(unittest.TestCase):
         with patch.dict(os.environ, GITHUB_EVENT_NAME="pull_request", GITHUB_SHA=git("rev-parse", "HEAD").decode().strip()):
             self.assertEqual(github_selection(), ({".github/workflows/ci.yml"}, False, set(), set()))
 
+    def test_policy_change_and_unowned_prose_do_not_select_every_suite(self):
+        suites = Path(".github/ci/suites.json")
+        suites.parent.mkdir()
+        ordinary = {"suites": {"product": ["app.js"]},
+                    "review_only": ["README.md"], "release_branches": []}
+        owned = {**ordinary, "suites": {"product": ["app.js", "README.md"]}}
+        unknown = {**ordinary, "review_only": []}
+        broad_review = {**ordinary, "review_only": ["*"]}
+
+        for index, (base_policy, candidate_policy, payload, expected) in enumerate((
+            (ordinary, ordinary, "README.md", set()),
+            (owned, ordinary, "README.md", FULL),
+            (ordinary, owned, "README.md", FULL),
+            (unknown, ordinary, "README.md", FULL),
+            (ordinary, unknown, "README.md", FULL),
+            (None, ordinary, "README.md", FULL),
+            (ordinary, ordinary, "app.js", FULL),
+            (broad_review, broad_review, "unregistered.sh", FULL),
+        )):
+            with self.subTest(base=base_policy, candidate=candidate_policy, payload=payload):
+                git("switch", "--detach", "-q", self.base)
+                if base_policy:
+                    suites.parent.mkdir(exist_ok=True)
+                    suites.write_text(json.dumps(base_policy))
+                    base = self.commit()
+                else:
+                    base = self.base
+                feature = f"policy-feature-{index}"
+                git("switch", "-qc", feature)
+                suites.parent.mkdir(exist_ok=True)
+                suites.write_text(json.dumps({**candidate_policy, "affected_main_push": True}))
+                Path(payload).write_text("Changed content\n")
+                self.commit()
+                git("switch", "--detach", "-q", base)
+                git("merge", "--no-ff", "-qm", "Test policy and payload", feature)
+                with patch.dict(os.environ, GITHUB_EVENT_NAME="pull_request",
+                                GITHUB_SHA=git("rev-parse", "HEAD").decode().strip()):
+                    controls, _, _, selected = github_selection()
+                self.assertEqual(controls, {str(suites)})
+                self.assertEqual(selected, expected)
+
     def test_yaml_setup_is_deferred_until_a_workflow_needs_parsing(self):
         workflow = Path(".github/workflows/ci.yml")
         workflow.write_text("jobs: {verification-scope: {steps: []}}\n")

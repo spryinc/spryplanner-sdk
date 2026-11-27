@@ -415,6 +415,8 @@ def route(selected):
     if previous is None:
         observations = [proof for proof in observations if proof.scope not in fresh]
     attempt = int(os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
+    if same_repo:
+        attempt = max(attempt, run.get("run_attempt", 1))
     if same_repo and not push and attempt > 1:
         observations.extend(proof for proof in earlier_attempt_results(
             run, int(payload["number"]), attempt, current, environment, groups,

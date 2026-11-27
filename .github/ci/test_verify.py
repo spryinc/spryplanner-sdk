@@ -207,6 +207,63 @@ class VerificationDefinitionTest(unittest.TestCase):
                 self.assertIsNone(history.reusable_validation(tested, 3, key))
                 lookup.assert_not_called()
 
+    def test_prior_pr_definition_proof_requires_matching_trusted_inputs(self):
+        import validation_history as history
+
+        tested, old, head, prior_head = (str(i) * 40 for i in range(1, 5))
+        key, old_key = "5" * 64, "6" * 64
+        workflow = ".github/workflows/ci.yml"
+        run = {"id": 31, "event": "pull_request", "repository": {"id": 7}, "workflow_id": 8,
+               "run_number": 17, "head_sha": head, "path": workflow, "run_attempt": 1}
+        prior = {**run, "id": 20, "run_number": 16, "head_sha": prior_head,
+                 "head_repository": {"id": 7}, "pull_requests": [{"number": 4}]}
+        payload = {"action": "synchronize", "pull_request": {
+            "number": 4, "head": {"ref": "feature", "repo": {"id": 7}, "sha": head},
+        }}
+        environment = {"GH_TOKEN": "fixture", "GITHUB_REPOSITORY": "spryinc/fixture",
+                       "GITHUB_REPOSITORY_ID": "7", "GITHUB_RUN_ID": "31",
+                       "GITHUB_EVENT_NAME": "pull_request", "GITHUB_JOB": "verification-scope",
+                       "GITHUB_WORKFLOW_REF": f"spryinc/fixture/{workflow}@refs/pull/4/merge"}
+        selector = {"name": "Selector", "id": 101, "run_id": 20,
+                    "run_attempt": 1, "conclusion": "success",
+                    "steps": [{"name": f"{history.STEP} {old_key}", "conclusion": "success"}]}
+        policy = {"review_only": ["*.md"], "suites": {"product": ["fixtures/*.md", "package.json"]}}
+        with (tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, environment, clear=True),
+              patch.object(history, "git", return_value=b"jobs: {verification-scope: {name: Selector}}"),
+              patch.object(history, "load_suites", return_value=policy),
+              patch("scope.git", return_value=b'{"docs/registered.md": []}'),
+              patch.object(history, "checked_parent", side_effect=lambda commit, _: prior_head if commit == old else head),
+              patch.object(history, "acquire_commit", return_value=True),
+              patch.object(history.subprocess, "run") as ancestor,
+              patch.object(history, "validation_key", return_value=old_key)):
+            event = Path(folder, "event.json")
+            event.write_text(json.dumps(payload))
+            os.environ["GITHUB_EVENT_PATH"] = str(event)
+            ancestor.return_value.returncode = 0
+            for changed, revision, earlier, jobs, expected in (
+                ({"README.md"}, old, prior, [selector], (1, 101)),
+                (set(), old, prior, [selector], (1, 101)),
+                ({"fixtures/handbook.md"}, old, prior, [selector], None),
+                ({".github/ci/README.md"}, old, prior, [selector], None),
+                ({"scripts/ci/README.md"}, old, prior, [selector], None),
+                ({"docs/registered.md"}, old, prior, [selector], None),
+                ({"package.json"}, old, prior, [selector], None),
+                ({"README.md"}, head, prior, [selector], None),
+                ({"README.md"}, old, {**prior, "pull_requests": [{"number": 5}]}, [selector], None),
+                ({"README.md"}, old, prior, [{**selector, "conclusion": "failure"}], None),
+                ({"README.md"}, old, prior, [selector, {**selector, "id": 999}], None),
+                ({"README.md"}, old, prior, [{**selector, "steps": []}], None),
+            ):
+                with (patch.object(history, "changes", return_value=changed),
+                      patch.object(history, "authenticated_revision", return_value=revision),
+                      patch.object(history, "api", side_effect=[run, {"workflow_runs": [earlier]}, {"jobs": jobs}])):
+                    self.assertEqual(history.reusable_previous_validation("selection", tested, key), expected)
+            payload["pull_request"]["head"]["repo"]["id"] = 9
+            event.write_text(json.dumps(payload))
+            with patch.object(history, "api") as provider:
+                self.assertIsNone(history.reusable_previous_validation("selection", tested, key))
+                provider.assert_not_called()
+
     def test_definition_validation_key_tracks_runner_image_and_selected_checks(self):
         import validation_history as history
 
