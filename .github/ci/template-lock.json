@@ -20,8 +20,8 @@
   "overrides": {
     ".github/ci/github_updates.py": {
       "owner": "Planner SDK maintainers",
-      "reason": "Keep SDK tarball and external installation evidence fresh whenever required.",
-      "sha256": "516be5d2d4ce59f84799393ef9adaa7a4440c03decedc799dad3f787902c417d"
+      "reason": "Keep package and installer results fresh for changed SDK inputs and release checkout, and retain complete matching PR matrix evidence for unrelated updates.",
+      "sha256": "f1bbc73b40d604a6f13792e5c2484e8a555419e144e27679c04d0705f7627fe4"
     },
     ".github/ci/scope.py": {
       "owner": "Planner SDK maintainers",
@@ -41,7 +41,7 @@
     ".github/ci/test_verify.py": {
       "owner": "Planner SDK maintainers",
       "reason": "Exercise the SDK result gate including its installation obligation.",
-      "sha256": "1d4b44e5dae3af6c69172afd4a821cc472e3811477a4db562f1093ce9d0ba0b8"
+      "sha256": "99f1173ab1cae5ed14f60d4161b0c835eef25ccf41d85153fb80d9025490a606"
     }
   }
 }

@@ -39,6 +39,9 @@ DEFAULT_WAIT_MINUTES = 10
 GATE_OVERHEAD_MINUTES = 2
 POLL_SECONDS = 30
 LOOKUP_TIMEOUT = 25
+SDK_INSTALL_JOBS = frozenset(
+    f"install ({runner})" for runner in ("ubuntu-latest", "macos-latest", "windows-latest")
+)
 
 
 def api(path, *, timeout=LOOKUP_TIMEOUT, **query):
@@ -222,6 +225,21 @@ def observed_jobs(run, jobs, candidate, groups=None, selected=None):
                                   run["run_number"], job["run_attempt"], job["id"], state)
 
 
+def sdk_install_result(run, jobs, producer):
+    """Qualify an earlier PR install only if its producer and whole matrix succeeded."""
+    if producer.state != "success":
+        return None
+    matrix = [job for job in jobs if job["name"] in SDK_INSTALL_JOBS
+              and job["run_id"] == run["id"] and job["run_attempt"] == producer.attempt]
+    if len(matrix) != len(SDK_INSTALL_JOBS) or {job["name"] for job in matrix} != SDK_INSTALL_JOBS:
+        return None
+    if any(job["status"] != "completed" for job in matrix):
+        return None
+    state = "success" if all(job["conclusion"] == "success" for job in matrix) else "failure"
+    return SuiteResult(producer.scope, producer.fingerprint, producer.context,
+                       producer.run_id, producer.run_number, producer.attempt, producer.job_id, state)
+
+
 def authenticated_revision(run, attempt, number):
     if attempt != run["run_attempt"] or not run.get("referenced_workflows"):
         record = api(f"actions/runs/{run['id']}/attempts/{attempt}")
@@ -265,7 +283,8 @@ def earlier_attempt_results(run, number, attempt, candidate, environment, groups
                                  candidate, groups, selected)
 
 
-def read_history(current, run, payload, head_repo, scopes, *, groups=None, path=WORKFLOW, delay=time.sleep):
+def read_history(current, run, payload, head_repo, scopes, *, groups=None, path=WORKFLOW,
+                 fresh=(), delay=time.sleep):
     groups = groups or {}
     pr = payload.get("number", 0)
     action = payload.get("action")
@@ -335,6 +354,9 @@ def read_history(current, run, payload, head_repo, scopes, *, groups=None, path=
                 obligations = selected_marker(required)
             if trusted and unchanged_controls(current.base, old.tested, path):
                 for record in observed_jobs(earlier, jobs, old, groups, selected):
+                    if record.scope in fresh:
+                        if not preceding or not (record := sdk_install_result(earlier, jobs, record)):
+                            continue
                     if current.inputs.get(record.scope) == record.fingerprint:
                         observations.append(record)
                         matched.add(record.scope)
@@ -379,14 +401,24 @@ def route(selected):
     scopes = set(current.inputs) if selected == ["*"] else set(selected) & current.inputs.keys()
     update = payload.get("action") == "synchronize"
     fresh = {suite for suite, definition in hosted.items() if definition.get("fresh")}
-    historical = scopes - fresh
-    previous, obligations, observations = read_history(current, run, payload, head_repo, historical, groups=groups, path=path) if (
-        same_repo and (historical or update)) else (None, set(), [])
+    historical = scopes if update and not push else scopes - fresh
+    previous, obligations, observations = read_history(
+        current, run, payload, head_repo, historical, groups=groups, path=path, fresh=fresh,
+    ) if same_repo and (historical or update) else (None, set(), [])
+    if previous is None:
+        observations = [proof for proof in observations if proof.scope not in fresh]
     attempt = int(os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
     if same_repo and not push and attempt > 1:
-        observations.extend(earlier_attempt_results(run, int(payload["number"]), attempt, current, environment, groups))
-    observations = [proof for proof in observations if proof.scope not in fresh]
-    retry = (scopes | set(obligations)) & fresh
+        observations.extend(proof for proof in earlier_attempt_results(
+            run, int(payload["number"]), attempt, current, environment, groups,
+        ) if proof.scope not in fresh)
+    required_fresh = (scopes | obligations) & fresh
+    if not update or push:
+        retry = required_fresh
+    elif previous is not None:
+        retry = {suite for suite in required_fresh if current.inputs[suite] != previous.inputs.get(suite)}
+    else:
+        retry = set()
     if attempt == 1 and update and previous is None and same_repo and payload.get("before"):
         before = payload["before"]
         if OID.fullmatch(before) and acquire_commit(before):

@@ -36,6 +36,87 @@ class VerificationDefinitionTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_workflow(changed, path, policy)
 
+    def test_sdk_install_routing_requires_a_complete_matching_pr_matrix(self):
+        import github_updates as updates
+        from updates import ScopeSnapshot
+
+        root = Path(__file__).resolve().parents[2]
+        policy = json.loads((root / ".github/ci/suites.json").read_text())
+        workflow = ".github/workflows/sdk-ci.yml"
+        tested, before_tested, base, head, before = (str(i) * 40 for i in range(1, 6))
+        environment = "1" * 64
+        inputs = {suite: "2" * 64 for suite in policy["suites"]}
+        previous = ScopeSnapshot(before_tested, base, before, "7/9/internal", inputs)
+        run = {"id": 10, "repository": {"id": 7}, "workflow_id": 9, "path": workflow,
+               "head_branch": "feature", "run_number": 10}
+        prior = {**run, "id": 8, "run_number": 8, "run_attempt": 1, "head_sha": before,
+                 "head_repository": {"id": 7}, "pull_requests": [{"number": 4}], "status": "completed"}
+        jobs = [
+            {"name": f"Candidate / Tested {before_tested} for 4 [sdk] [sdk] {environment}",
+             "run_attempt": 1},
+            {"name": "Suites verify-sdk", "run_id": 8, "run_attempt": 1, "id": 31,
+             "status": "completed", "conclusion": "success", "steps": [
+                 {"name": "Record matching runner inputs", "conclusion": "success"},
+                 {"name": "Execute selected suite: sdk", "conclusion": "success"},
+             ]},
+            *({"name": name, "run_id": 8, "run_attempt": 1, "status": "completed", "conclusion": "success"}
+              for name in sorted(updates.SDK_INSTALL_JOBS)),
+        ]
+        def lookup(path, **query):
+            if path == "actions/runs/10":
+                return run
+            if path == "actions/workflows/9/runs":
+                return {"workflow_runs": [prior]}
+            if path == "actions/runs/8/jobs":
+                return {"jobs": records}
+            if path == f"commits/{tested}/pulls":
+                return []
+            self.fail(f"Unexpected GitHub request: {path}")
+
+        cases = (
+            ("unrelated update", "pull_request", "synchronize", jobs, False, True, "false", "[]"),
+            ("missing matrix job", "pull_request", "synchronize", jobs[:-1], False, True, "false", '["sdk"]'),
+            ("duplicate matrix job", "pull_request", "synchronize", jobs + jobs[-1:], False, True, "false", '["sdk"]'),
+            ("wrong attempt", "pull_request", "synchronize", [*jobs[:-1], {**jobs[-1], "run_attempt": 2}], False, True, "false", '["sdk"]'),
+            ("failed matrix", "pull_request", "synchronize", [*jobs[:-1], {**jobs[-1], "conclusion": "failure"}], False, True, "false", '["sdk"]'),
+            ("untrusted workflow", "pull_request", "synchronize", jobs, False, False, "false", '["sdk"]'),
+            ("changed package", "pull_request", "synchronize", jobs, True, True, "true", "[]"),
+            ("open PR", "pull_request", "opened", jobs, False, True, "true", "[]"),
+            ("release push", "push", None, jobs, False, True, "true", "[]"),
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            event = Path(folder, "event.json")
+            output = Path(folder, "output")
+            for name, kind, action, records, changed, trusted, expected, unresolved in cases:
+                with self.subTest(name=name):
+                    payload = {"before": before}
+                    if kind == "pull_request":
+                        payload.update(action=action, number=4, pull_request={"head": {"repo": {"id": 7}}})
+                    event.write_text(json.dumps(payload))
+                    output.write_text("")
+                    current = ScopeSnapshot(tested, base, head, "7/9/internal", {
+                        **inputs, "sdk": "3" * 64 if changed else inputs["sdk"],
+                    })
+                    with (patch.dict(os.environ, GITHUB_EVENT_PATH=str(event), GITHUB_OUTPUT=str(output),
+                                     GITHUB_SHA=tested, GITHUB_EVENT_NAME=kind, GITHUB_REPOSITORY_ID="7",
+                                     GITHUB_RUN_ID="10", GITHUB_RUN_ATTEMPT="1"),
+                          patch.object(updates, "git", return_value=tested.encode()),
+                          patch.object(updates, "workflow_path", return_value=workflow),
+                          patch.object(updates, "load_suites", return_value=policy),
+                          patch.object(updates, "api", side_effect=lookup),
+                          patch.object(updates, "environment_key", return_value=environment),
+                          patch.object(updates, "candidate_snapshot", side_effect=lambda commit, *args, **kwargs:
+                                       current if commit == tested else previous),
+                          patch.object(updates, "unchanged_controls", side_effect=lambda left, right, path:
+                                       trusted if left == base else True),
+                          patch.object(updates, "authenticated_revision", return_value=before_tested),
+                          patch.object(updates, "acquire_commit", return_value=True),
+                          patch.object(updates, "checked_parent", return_value=before)):
+                        updates.route(["sdk"])
+                    routed = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                    self.assertEqual(routed["run_sdk"], expected)
+                    self.assertEqual(routed["unresolved"], unresolved)
+
     def test_hosted_gate_reserves_time_for_the_registered_wait(self):
         from verify import validate_workflow
         root = Path(__file__).resolve().parents[2]
